@@ -1,0 +1,24 @@
+# Go build artifacts
+/cmd/cli/cli
+/cmd/server/server
+*.exe
+
+# Nix
+/result
+/result-*
+/.direnv/
+
+# Local dev state
+/.env
+/data/
+/vendor/
+
+# Editor
+*.swp
+*.swo
+.idea/
+.vscode/
+*~
+
+# Claude Code per-machine settings (regenerated per machine).
+.claude/settings.local.json
