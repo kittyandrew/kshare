@@ -105,3 +105,9 @@ nix flake check              # verifies all packages evaluate
 - `docs/deployment.md` — production wiring, threat model, smoke test
 - `docs/zitadel.md` — Zitadel project setup walkthrough
 - `.claude/rules/` — agent operating manual; auto-loaded each session
+
+## License
+
+[AGPL-3.0-or-later](LICENSE). If you run a modified kshared exposed
+over a network, the AGPL's §13 obligates you to make the modified
+source available to your users.
