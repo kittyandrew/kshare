@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -81,14 +80,32 @@ func runUpload(args []string) {
 // wlCopy is a best-effort write to the wayland clipboard. If wl-copy
 // isn't installed or it fails, we just skip -- the URL is already on
 // stdout.
+//
+// @NOTE: stdout AND stderr MUST be *os.File (not io.Discard / any
+// io.Writer), because wl-copy daemonises itself to hold the clipboard
+// for the rest of the Wayland session, and during daemonisation it
+// redirects its own stdin + stdout to /dev/null but LEAVES STDERR
+// INHERITED (see wl-copy.c). If we hand exec a Go writer for stderr,
+// exec.Cmd creates a pipe + copy-goroutine that drains until EOF --
+// which only fires when the daemon closes the inherited stderr FD,
+// i.e. when you log out. cmd.Run() then blocks for the whole session.
+// Passing /dev/null as *os.File makes Go dup2 it straight into the
+// child, no pipe, no goroutine, no wait. If we fail to open
+// /dev/null, skip rather than fall back to inherited FDs (would
+// re-introduce the daemon-FD hang).
 func wlCopy(s string) {
 	bin, err := exec.LookPath("wl-copy")
 	if err != nil {
 		return
 	}
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		return
+	}
+	defer devNull.Close()
 	cmd := exec.Command(bin)
 	cmd.Stdin = bytes.NewBufferString(s)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stdout = devNull
+	cmd.Stderr = devNull
 	_ = cmd.Run()
 }
