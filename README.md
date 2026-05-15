@@ -4,19 +4,6 @@ OIDC-gated, single-uploader file share. Drop any file from the CLI;
 get back a random, opaque, public URL that renders inline in the
 browser.
 
-## Layout
-
-| Path | Contents |
-|------|----------|
-| `cmd/cli/` | CLI (`kshare` binary): auth, upload, replace, ls, rm |
-| `cmd/server/` | Server (`kshared` binary): OIDC-gated API, /s/ file serving, expiry sweeper |
-| `internal/store/` | SQLite-backed metadata + atomic file write |
-| `nix/kshare.nix` | `buildGoModule` derivations + `dockerTools` OCI image |
-| `nix/scripts/` | Dev lifecycle scripts (dev-up/down/rebuild/clean) |
-| `docs/deployment.md` | Threat model + production wiring (Docker, Caddy, fail2ban, smoke test) |
-| `docs/zitadel.md` | Operator-facing Zitadel setup procedure |
-| `.claude/rules/` | Auto-loaded operating manual for Claude Code sessions |
-
 ## Setup
 
 You need an existing Zitadel project to authenticate the CLI. The
