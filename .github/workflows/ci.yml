@@ -1,15 +1,9 @@
 name: ci
 
-# CI gates: code MUST build, vet clean, test green (with -race), and
-# the Nix flake MUST evaluate + the OCI image MUST build. PRs and
-# pushes to main both run the full suite.
-#
-# Two parallel jobs:
-#   go: fast feedback on Go-only changes. Uses actions/setup-go reading
-#       the toolchain from go.mod.
-#   nix: slower but covers what go-only can't -- vendorHash drift, dev-
-#        script evaluation, OCI image layer construction. Pins via the
-#        nix-installer action; flake.lock is the version source of truth.
+# Go-side code-quality gates. Runs on every PR and every push to main.
+# Nix evaluation + OCI image build + Attic cache push live in
+# build.yml, main-branch only -- keeps PR runtime tight and isolates
+# the Attic push token from fork-PR contexts.
 
 on:
   push:
@@ -29,17 +23,3 @@ jobs:
       - run: go vet ./...
       - run: go test -count=1 -race ./...
       - run: go build ./...
-
-  nix:
-    name: nix flake check + image build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      # Pinned to released tags. magic-nix-cache was EOL'd in early
-      # 2025 and restored on a reverse-engineered GitHub Cache backend
-      # -- pinning keeps CI deterministic if the maintainer changes
-      # the action again.
-      - uses: DeterminateSystems/nix-installer-action@v17
-      - uses: DeterminateSystems/magic-nix-cache-action@v9
-      - run: nix flake check
-      - run: nix build .#kshared-image

@@ -1,0 +1,41 @@
+name: build
+
+# Main-branch only: full Nix pipeline -- flake check, OCI image build,
+# and Attic cache push (via attic-action's post-build hook).
+#
+# Why a separate workflow from ci.yml:
+#   - PRs (incl. fork PRs) and tag pushes don't run this. The Attic
+#     push token never leaves the main-branch context -- a fork can't
+#     exfiltrate it.
+#   - ci.yml runs Go-side quality gates on every PR. Nix correctness
+#     is checked here, after merge to main. Operator-only repo, so PR
+#     gating Nix would burn minutes without preventing anything that
+#     can't be caught + reverted post-merge.
+#
+# See `.claude/rules/selfhosted/202-attic.md` in github.com/kittyandrew/kittyos
+# for the cache topology + token minting procedure.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  nix:
+    name: nix check + build + push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v17
+      - uses: DeterminateSystems/magic-nix-cache-action@v9
+      # attic-action installs a post-build hook BEFORE the build step,
+      # so any derivations produced by `nix flake check` + `nix build`
+      # below get pushed to the cache automatically -- no separate
+      # `attic push` call.
+      - name: setup attic cache
+        uses: ryanccn/attic-action@v0
+        with:
+          endpoint: ${{ vars.ATTIC_ENDPOINT }}
+          cache: general
+          token: ${{ secrets.ATTIC_GENERAL_PUSH_TOKEN }}
+      - run: nix flake check
+      - run: nix build .#kshared-image
