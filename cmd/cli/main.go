@@ -19,6 +19,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
+
+	"github.com/zitadel/oidc/v3/pkg/oidc"
 )
 
 func main() {
@@ -109,14 +112,51 @@ func fail(format string, args ...any) {
 }
 
 // failRequest is the exit path for any error returned from an HTTP
-// request to the kshared server. It distinguishes "no usable
-// credentials" (route the user to `kshare auth login`) from generic
-// errors (network, 5xx, decode) so the message points at the right
-// next step.
+// request to the kshared server. Three branches, each routing the
+// user to a different next step:
+//
+//   - errNotLoggedIn: no usable persisted credentials (auth.json
+//     missing, or no refresh_token in it). Fix: `kshare auth login`.
+//   - errRefreshFailed: auth-layer rejection that re-login won't
+//     fix (IdP refused refresh grant, OR server rejected an
+//     otherwise-fresh token). Surfaces the upstream error via
+//     printRefreshError so the operator sees what to fix.
+//   - anything else: generic network/5xx/decode. Print the err.
 func failRequest(err error) {
 	if errors.Is(err, errNotLoggedIn) {
 		fmt.Fprintln(os.Stderr, "kshare: not logged in; run `kshare auth login`")
 		os.Exit(1)
 	}
+	if errors.Is(err, errRefreshFailed) {
+		printRefreshError(err)
+		fmt.Fprintln(os.Stderr, "kshare: fix the upstream cause and re-run; if unsure, try `kshare auth login`")
+		os.Exit(1)
+	}
 	fail("kshare: %v", err)
+}
+
+// printRefreshError surfaces the upstream cause of an
+// errRefreshFailed. Single helper so runStatus and failRequest emit
+// the same shape regardless of which CLI subcommand triggered the
+// failure.
+//
+// Extraction strategy: prefer *oidc.Error (the typed upstream error
+// from refresh-grant rejections) which formats as
+// "ErrorType=X Description=Y" and carries the canonical Zitadel
+// reason. For non-OIDC paths (e.g. server-side 401 wrapped in
+// doJSON), iterate the joined-error chain so each line gets the
+// "kshare: " prefix -- errors.Join's default Error() joins with
+// bare newlines, which reads oddly against other prefixed lines.
+func printRefreshError(err error) {
+	var oidcErr *oidc.Error
+	if errors.As(err, &oidcErr) {
+		fmt.Fprintf(os.Stderr, "kshare: auth rejected: %s\n", oidcErr)
+		return
+	}
+	for _, line := range strings.Split(err.Error(), "\n") {
+		if line == "" {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "kshare: %s\n", line)
+	}
 }

@@ -129,8 +129,56 @@ Project -> General -> **+ New Application** -> 3-step wizard:
 - Step 2: Auth Method **Device Code**, Continue
 - Step 3: Create
 
-After creation, app detail -> **Token Settings** sidebar ->
-**AuthToken Options** card:
+The wizard creates the app with `grant_types = [device_code]` only;
+that's not enough for a long-lived CLI. **Two post-wizard sections
+need editing.**
+
+### 8a -- OIDC Configuration: add `Refresh Token` to grant types
+
+App detail -> top form, "Grant Type" multi-select dropdown:
+
+- Add **Refresh Token** alongside Device Code. Save.
+
+The Console also exposes a "Refresh Token" checkbox below the
+dropdown, but it's **disabled for Device Code apps** (the UI ties it
+to Authorization Code). Use the multi-select directly.
+
+Without this, every `kshare` call after the access token's natural
+expiry will fail to refresh with
+`unauthorized_client: grant_type "refresh_token" not allowed` -- the
+canonical Zitadel silent failure for native device-flow apps. The
+rejection happens at the `withClient` middleware in
+`github.com/zitadel/oidc` `pkg/op/server_http.go` via
+`ValidateGrantType`, before the refresh handler even runs.
+
+(Note: Zitadel's OIDC server-of-protocol code lives in a separate
+repo, [`github.com/zitadel/oidc`][oidc], imported by the main
+[`github.com/zitadel/zitadel`][zit] application. References below
+prefix the repo where there's any chance of ambiguity.)
+
+[oidc]: https://github.com/zitadel/oidc
+[zit]: https://github.com/zitadel/zitadel
+
+The `offline_access` scope the CLI requests is necessary but **not
+sufficient**. Issuance and use are gated separately:
+
+- **Issuance** -- gated on scope.
+  `github.com/zitadel/zitadel` `internal/api/oidc/device_auth.go::StoreDeviceAuthorization`
+  decides whether to mint a refresh token by checking
+  `slices.Contains(scope, ScopeOfflineAccess)`.
+- **Use** -- gated on the app's `grant_types` allowlist.
+  `github.com/zitadel/oidc` `pkg/op/server_http.go::withClient`
+  rejects up-front;
+  `github.com/zitadel/oidc` `pkg/op/token_refresh.go::AuthorizeRefreshClient`
+  re-checks defensively.
+
+Two config knobs, both required: `offline_access` in scopes (CLI
+side; see `cmd/cli/auth.go::loginScopes`) AND `refresh_token` in
+the app's grant_types list (Zitadel-side; this step).
+
+### 8b -- Token Settings: AuthToken Options
+
+App detail -> **Token Settings** sidebar -> **AuthToken Options** card:
 
 - Auth Token Type dropdown: **JWT** (changes from the default Bearer
   Token). This must be JWT -- the server verifies the token offline
@@ -179,7 +227,7 @@ echo "<access_token>" | cut -d. -f2 | base64 -d 2>/dev/null | jq
 ```
 
 If step 4 doesn't show the `upload` role under the project-scoped
-URN, the "Add user roles to the access token" toggle in step 8 is
+URN, the "Add user roles to the access token" toggle in step 8b is
 the most likely culprit (and is the canonical Zitadel silent failure).
 
 ## Common pitfalls
@@ -196,9 +244,17 @@ the most likely culprit (and is the canonical Zitadel silent failure).
   org-scoped users. The CLI rewrites the path to
   `/ui/v2/login/device` before opening the browser
   (`cmd/cli/auth.go::runLogin`).
-- **Forgot the "Add user roles to access token" toggle.** Step 8.
+- **Forgot the "Add user roles to access token" toggle.** Step 8b.
   Without it, role check denies and the user sees
   `forbidden: missing role upload`.
+- **Forgot to add Refresh Token to grant types.** Step 8a. The Device
+  Code wizard preset only sets `grant_types=[device_code]`. The login
+  succeeds and the CLI gets a refresh token (because `offline_access`
+  is in scopes), but every refresh attempt is rejected by the
+  grant-type allowlist. Symptom: CLI works the day you log in,
+  prints "not logged in" the next morning, every morning. Run
+  `kshare auth status` -- the stderr `auth rejected:` line shows the
+  upstream `unauthorized_client: grant_type "refresh_token" not allowed`.
 - **Audience mismatch.** `KSHARE_OIDC_AUDIENCE` must be the
   numeric **project ID** (step 4), not the API app's Client ID
   (step 7). Easy mistake.
@@ -212,6 +268,6 @@ the most likely culprit (and is the canonical Zitadel silent failure).
 |---|---|
 | `KSHARE_OIDC_ISSUER` | constant: `https://auth.example.com` |
 | `KSHARE_OIDC_AUDIENCE` | project ID from step 4 |
-| `KSHARE_OIDC_CLIENT_ID` | `kshare-cli` Client ID from step 8 |
+| `KSHARE_OIDC_CLIENT_ID` | `kshare-cli` Client ID from step 8b |
 | `kshare-server` Client ID | not used by the server at runtime; exists only to declare the audience |
 | `~/.config/kshare/zitadel-server-key.json` | downloaded in step 7; archive for safekeeping. Not consumed by `kshared` (resource server, not client) |

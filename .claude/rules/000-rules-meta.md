@@ -12,7 +12,7 @@ the table below before creating files in that range.
 
 | Prefix | Section | Contents |
 |--------|---------|----------|
-| `000` | `(root)` | Meta, architecture, dev stack |
+| `000` | `(root)` | Meta, architecture, dev stack, CI, auth |
 | `0xx` | `00-project/` | Project-wide style + discipline rules. Mostly external references (Beeper Go guidelines, log levels) plus universal Go anti-patterns ported from sibling projects. External-source rules carry a `source:` URL in frontmatter; refresh by re-fetching. |
 | `01x` | Reserved | Future operational rules |
 

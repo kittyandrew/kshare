@@ -44,7 +44,7 @@ func runReplace(args []string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	req, err := newRequest(ctx, http.MethodPut, "/api/files/"+slug, f)
+	req, t, err := newRequest(ctx, http.MethodPut, "/api/files/"+slug, f)
 	if err != nil {
 		failRequest(err)
 	}
@@ -60,8 +60,7 @@ func runReplace(args []string) {
 		failRequest(err)
 	}
 
-	server, _ := serverURL()
-	url := publicURL(server, &resp)
+	url := publicURL(t.Server, &resp)
 	fmt.Println(url)
 	wlCopy(url)
 }

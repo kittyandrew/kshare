@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/kittyandrew/kshare/internal/api"
@@ -24,7 +26,7 @@ func runDelete(args []string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	req, err := newRequest(ctx, http.MethodDelete, "/api/files/"+slug, nil)
+	req, _, err := newRequest(ctx, http.MethodDelete, "/api/files/"+slug, nil)
 	if err != nil {
 		failRequest(err)
 	}
@@ -42,11 +44,18 @@ func runDelete(args []string) {
 		fmt.Fprintf(os.Stderr, "kshare: no such slug %s\n", slug)
 		os.Exit(1)
 	case http.StatusUnauthorized:
-		failRequest(errNotLoggedIn)
+		// Post-refresh 401 means server-side misconfig, not
+		// "log in again." Same routing as doJSON.
+		failRequest(server401Err(resp))
 	default:
 		// Pull whatever body the server returned (status messages
 		// are short by design) into the error.
-		fail("kshare rm: server returned %s", resp.Status)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, errBodyMax))
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			fail("kshare rm: server returned %s", resp.Status)
+		}
+		fail("kshare rm: server returned %s: %s", resp.Status, msg)
 	}
 }
 

@@ -55,7 +55,7 @@ func runUpload(args []string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	req, err := newRequest(ctx, http.MethodPost, "/api/upload", f)
+	req, t, err := newRequest(ctx, http.MethodPost, "/api/upload", f)
 	if err != nil {
 		failRequest(err)
 	}
@@ -71,8 +71,7 @@ func runUpload(args []string) {
 		failRequest(err)
 	}
 
-	server, _ := serverURL()
-	url := publicURL(server, &resp)
+	url := publicURL(t.Server, &resp)
 	fmt.Println(url)
 	wlCopy(url)
 }

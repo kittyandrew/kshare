@@ -12,7 +12,6 @@ import (
 	"github.com/kittyandrew/kshare/internal/api"
 )
 
-
 // runList implements `kshare ls [--json]`. Default output is a
 // column-aligned table; --json dumps the raw API response so
 // scripts can pipe through jq.
@@ -32,7 +31,7 @@ func runList(args []string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	req, err := newRequest(ctx, http.MethodGet, "/api/files", nil)
+	req, _, err := newRequest(ctx, http.MethodGet, "/api/files", nil)
 	if err != nil {
 		failRequest(err)
 	}

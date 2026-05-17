@@ -26,7 +26,11 @@ nix run .#kshare -- ls        # confirm auth works (empty list is fine)
 
 Tokens persist at `~/.config/kshare/auth.json` (mode 0600).
 Refresh-on-expiry is automatic; re-run `login` only if Zitadel
-rotates your refresh token (rare) or you `logout`.
+rotates your refresh token (rare) or you `logout`. If a refresh
+ever fails silently, `kshare auth status` surfaces the upstream
+OIDC error -- the canonical first-time silent failure is a
+missing `refresh_token` entry in the Zitadel app's grant types
+(see `docs/zitadel.md` 8a).
 
 ## Local dev loop (Docker-based, end-to-end)
 
@@ -91,6 +95,8 @@ nix flake check              # verifies all packages evaluate
 
 - `docs/deployment.md` — production wiring, threat model, smoke test
 - `docs/zitadel.md` — Zitadel project setup walkthrough
+- `docs/decisions/` — ADRs for choices that need to outlive a session
+  (e.g. `2026-05-17-device-code-vs-pkce.md`)
 - `.claude/rules/` — agent operating manual; auto-loaded each session
 
 ## License
