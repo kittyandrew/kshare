@@ -29,6 +29,7 @@
     postInstall = ''
       mv $out/bin/cli $out/bin/kshare
     '';
+    meta.mainProgram = "kshare";
   };
 
   kshared = pkgs.buildGoModule {
