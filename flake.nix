@@ -1,7 +1,7 @@
 {
   description = "kshare -- OIDC-gated single-uploader file share";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
   outputs = {
     self,
