@@ -12,7 +12,7 @@
     flake-utils,
   }:
     flake-utils.lib.eachDefaultSystem (system: let
-      pkgs = import nixpkgs {inherit system;};
+      pkgs = nixpkgs.legacyPackages.${system};
       # CalVer: vYY.MM derived from the flake's source modification
       # date. `self.lastModifiedDate` is "YYYYMMDDhhmmss". May 2026
       # builds report `v26.05`. Operator-managed release tags follow
