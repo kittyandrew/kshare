@@ -10,15 +10,11 @@ import (
 	"strings"
 )
 
-// slugCollisionRetries bounds the slug-generation loop. With 48 bits
-// of entropy collision probability is negligible at v1's scale (a
-// few hundred live uploads); 5 retries covers the impossible case
-// where crypto/rand returns a duplicate.
+// slugCollisionRetries bounds the slug-generation loop. With 48 bits of entropy a collision is negligible at
+// v1's scale (a few hundred live uploads); the retries cover the impossible case where crypto/rand repeats.
 const slugCollisionRetries = 5
 
-// generateSlug returns an 8-char base64url string from 6 random
-// bytes (48 bits of entropy). Single-uploader scope; fail2ban
-// backstops slug brute-force.
+// generateSlug's shape must stay in sync with api.SlugRe, which every other component validates against.
 func generateSlug() (string, error) {
 	var b [6]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -27,8 +23,7 @@ func generateSlug() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
-// randHex returns n hex-encoded random bytes. Used for .partial /
-// nonce filenames where we want something obviously not-a-slug.
+// randHex names `.partial` scratch files, where the point is to look obviously unlike a slug.
 func randHex(n int) (string, error) {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -37,12 +32,9 @@ func randHex(n int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// sanitiseOriginalFilename returns a save-as-friendly representation
-// of the uploader's filename. Strips path separators, control chars,
-// and quote-shaped chars so it can be embedded into a
-// Content-Disposition header without escaping concerns. Truncates by
-// rune (not byte) so a multi-byte codepoint at the boundary isn't
-// split.
+// sanitiseOriginalFilename returns a save-as-friendly version of the uploader's filename: no path
+// separators, control chars, or quote-shaped chars, so it can be embedded in a Content-Disposition header
+// without escaping concerns. Truncation is by rune, so a multi-byte codepoint at the boundary can't be split.
 func sanitiseOriginalFilename(name string) string {
 	if i := strings.LastIndexAny(name, `/\`); i >= 0 {
 		name = name[i+1:]
@@ -64,8 +56,6 @@ func sanitiseOriginalFilename(name string) string {
 	return out
 }
 
-// subjectFromCtx returns the authenticated principal's subject claim,
-// or "" if no claims are attached.
 func subjectFromCtx(ctx context.Context) string {
 	if c, ok := claimsFromContext(ctx); ok {
 		return c.Subject
@@ -73,7 +63,6 @@ func subjectFromCtx(ctx context.Context) string {
 	return ""
 }
 
-// isMaxBytesErr returns true if err is or wraps http.MaxBytesError.
 func isMaxBytesErr(err error) bool {
 	var mbe *http.MaxBytesError
 	return errors.As(err, &mbe)

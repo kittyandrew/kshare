@@ -1,9 +1,7 @@
 name: ci
 
-# Go-side code-quality gates. Runs on every PR and every push to main.
-# Nix evaluation + OCI image build + Attic cache push live in
-# build.yml, main-branch only -- keeps PR runtime tight and isolates
-# the Attic push token from fork-PR contexts.
+# Go gates only. Nix and the Attic push live in build.yml, so this workflow needs no secrets and fork PRs
+# run against it safely.
 
 on:
   push:
@@ -20,6 +18,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # gofmt has no exit code of its own: it lists offenders and returns 0, so turn a non-empty list into a
+      # failure. Without this the tree drifts out of format and nothing notices.
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
       - run: go vet ./...
       - run: go test -count=1 -race ./...
       - run: go build ./...

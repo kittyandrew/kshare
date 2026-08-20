@@ -1,18 +1,5 @@
-// kshare: CLI for kshare. See
-// .claude/rules/001-architecture.md for component topology;
-// docs/deployment.md for production wiring.
-//
-//	kshare auth login [--server URL]   # Zitadel device-flow login
-//	kshare auth logout                 # clear cached tokens
-//	kshare auth status                 # show current login state
-//	kshare <file> [--ttl X]            # upload (default verb)
-//	kshare replace <slug> <file>       # replace existing slug's content
-//	kshare ls [--json]                 # list uploads
-//	kshare rm <slug>                   # delete by slug
-//	kshare --help
-//
-// Tokens persist at ~/.config/kshare/auth.json (mode 0600), refreshed
-// transparently on expiry.
+// kshare: the CLI. Component topology in .claude/rules/001-architecture.md, production wiring in
+// docs/deployment.md. The command list lives in usage() below, once.
 package main
 
 import (
@@ -49,14 +36,11 @@ func main() {
 		return
 	}
 
-	// Default verb: upload. The first positional argument is the path
-	// to the file. `--ttl <dur>` is the only flag.
+	// Default verb: upload. The first positional argument is the file path; `--ttl <dur>` is the only flag.
 	runUpload(args)
 }
 
-// runAuth dispatches `kshare auth <subcommand>`. Three subs:
-// login / logout / status. Anything else (including missing) prints
-// usage.
+// runAuth dispatches login / logout / status; anything else, including nothing, prints usage.
 func runAuth(args []string) {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: kshare auth (login [--server URL] | logout | status)")
@@ -77,12 +61,12 @@ func runAuth(args []string) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `kshare -- OIDC-gated file share CLI
+	fmt.Fprintln(os.Stderr, `kshare: OIDC-gated file share CLI
 
 Usage:
   kshare auth login [--server URL]      Zitadel device-flow login
-                                        (--server defaults to
-                                        http://localhost:6980)
+                                        (--server defaults to $KSHARE_SERVER,
+                                        else http://localhost:6980)
   kshare auth logout                    Clear cached tokens
   kshare auth status                    Show current login state
   kshare <file> [--ttl 24h]             Upload a file (default verb)
@@ -99,29 +83,24 @@ Environment (required for `+"`kshare auth login`"+`):
   KSHARE_OIDC_AUDIENCE    Zitadel project ID
   KSHARE_OIDC_CLIENT_ID   kshare-cli Native app client ID
 
+Optional:
+  KSHARE_SERVER           Default for --server at login time
+
 After `+"`kshare auth login`"+`, these + the server URL are persisted to
 ~/.config/kshare/auth.json. Subsequent commands use the persisted
 values; no env required.`)
 }
 
-// fail prints a short error to stderr and exits 1. Used for
-// user-facing errors that don't warrant a stack trace.
+// fail prints a short error to stderr and exits 1, for user-facing errors that don't warrant a trace.
 func fail(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
 }
 
-// failRequest is the exit path for any error returned from an HTTP
-// request to the kshared server. Three branches, each routing the
-// user to a different next step:
-//
-//   - errNotLoggedIn: no usable persisted credentials (auth.json
-//     missing, or no refresh_token in it). Fix: `kshare auth login`.
-//   - errRefreshFailed: auth-layer rejection that re-login won't
-//     fix (IdP refused refresh grant, OR server rejected an
-//     otherwise-fresh token). Surfaces the upstream error via
-//     printRefreshError so the operator sees what to fix.
-//   - anything else: generic network/5xx/decode. Print the err.
+// failRequest is the exit path for any error from a request to kshared. Each sentinel routes the user to a
+// different next step: errNotLoggedIn says "log in", errRefreshFailed surfaces the upstream cause via
+// printRefreshError, and anything else (network, 5xx, decode) prints as-is. Both sentinels are documented at
+// their declaration in auth.go.
 func failRequest(err error) {
 	if errors.Is(err, errNotLoggedIn) {
 		fmt.Fprintln(os.Stderr, "kshare: not logged in; run `kshare auth login`")
@@ -135,25 +114,20 @@ func failRequest(err error) {
 	fail("kshare: %v", err)
 }
 
-// printRefreshError surfaces the upstream cause of an
-// errRefreshFailed. Single helper so runStatus and failRequest emit
-// the same shape regardless of which CLI subcommand triggered the
-// failure.
+// printRefreshError surfaces the upstream cause of an errRefreshFailed, so runStatus and failRequest emit
+// the same shape whichever subcommand tripped it.
 //
-// Extraction strategy: prefer *oidc.Error (the typed upstream error
-// from refresh-grant rejections) which formats as
-// "ErrorType=X Description=Y" and carries the canonical Zitadel
-// reason. For non-OIDC paths (e.g. server-side 401 wrapped in
-// doJSON), iterate the joined-error chain so each line gets the
-// "kshare: " prefix -- errors.Join's default Error() joins with
-// bare newlines, which reads oddly against other prefixed lines.
+// Prefer *oidc.Error, the typed upstream error from refresh-grant rejections: it formats as
+// "ErrorType=X Description=Y" and carries the canonical Zitadel reason. For non-OIDC paths (a server-side
+// 401 wrapped in doJSON) iterate the joined chain instead, so every line gets the "kshare: " prefix;
+// errors.Join's own Error() joins with bare newlines, which reads oddly against other prefixed lines.
 func printRefreshError(err error) {
 	var oidcErr *oidc.Error
 	if errors.As(err, &oidcErr) {
 		fmt.Fprintf(os.Stderr, "kshare: auth rejected: %s\n", oidcErr)
 		return
 	}
-	for _, line := range strings.Split(err.Error(), "\n") {
+	for line := range strings.SplitSeq(err.Error(), "\n") {
 		if line == "" {
 			continue
 		}

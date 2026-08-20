@@ -3,18 +3,18 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
-// parseTTLFlag walks args looking for `--ttl <value>` and `--help`/`-h`.
-// Returns the parsed TTL (or "" if absent) and the leftover positional
-// arguments. Prints `usage` and exits 0 on a help flag. Used by
-// `kshare <file>` (upload) and `kshare replace <slug> <file>`; list
-// has a different shape and rolls its own parsing.
+// parseTTLFlag walks args looking for `--ttl <value>` and `--help`/`-h`. Returns the parsed TTL ("" if
+// absent) and the leftover positional arguments, printing `usage` and exiting 0 on a help flag.
 func parseTTLFlag(args []string, usage string) (ttl string, pos []string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--ttl":
-			if i+1 >= len(args) {
+			// A following flag means the value was forgotten: no valid duration starts with `-`, and
+			// swallowing the flag would send it to the server as a TTL and come back a puzzling 400.
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
 				fail("kshare: --ttl requires a duration argument (e.g. 24h)")
 			}
 			ttl = args[i+1]

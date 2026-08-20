@@ -1,79 +1,68 @@
 # Zitadel data model for kshare
 
-OIDC org/user/project/role/apps that `kshare-cli` and `kshared` server
-authenticate against. All steps as IAM_OWNER (`zitadel-admin`) in
-your Zitadel Console (replace `https://auth.example.com` throughout
-with your issuer). Order matters -- dependencies are hard.
+OIDC org/user/project/role/apps that `kshare-cli` and `kshared` server authenticate against. All steps as
+IAM_OWNER (`zitadel-admin`) in your Zitadel Console (replace `https://auth.example.com` throughout with your
+issuer). Order matters: dependencies are hard.
 
 ## Choose your org layout
 
 Before step 1, pick one:
 
-**A. Reuse an existing org.** If you're already running Zitadel for
-another service, your existing user + passkey carry over; you only
-create the `kshare` project + role + apps inside that org. **Skip
-steps 1, 2, 3.** Step 6 is a same-org grant.
+**A. Reuse an existing org.** If you're already running Zitadel for another service, your existing user +
+passkey carry over; you only create the `kshare` project + role + apps inside that org. **Skip steps 1, 2,
+3.** Step 6 is a same-org grant.
 
-**B. Fresh `kshare` org.** Hard isolation between services. You'll
-either create a new user (do steps 1-3) or grant an existing user
-from another org access to the kshare project (skip step 3, use step
-6's cross-org grant note).
+**B. Fresh `kshare` org.** Hard isolation between services. You'll either create a new user (do steps 1-3) or
+grant an existing user from another org access to the kshare project (skip step 3, use step 6's cross-org
+grant note).
 
-For a single-uploader personal share, **A** is simpler. **B** is
-right if you want admin-UI separation between services or anticipate
-multi-tenant boundaries later. Either way, the resulting `.env` is
-the same shape; only what you click in the Console differs.
+For a single-uploader personal share, **A** is simpler. **B** is right if you want admin-UI separation
+between services or anticipate multi-tenant boundaries later. Either way, the resulting `.env` is the same
+shape; only what you click in the Console differs.
 
-## 1 -- Org `kshare` (option B only)
+## 1. Org `kshare` (option B only)
 
-Top-bar org switcher -> **Create New Organization** -> name `kshare`.
-Record the numeric **org ID**. Username domain becomes
-`<localpart>@kshare.<ExternalDomain>`.
+Top-bar org switcher -> **Create New Organization** -> name `kshare`. Record the numeric **org ID**. Username
+domain becomes `<localpart>@kshare.<ExternalDomain>`.
 
-## 2 -- Login policy (option B only)
+## 2. Login policy (option B only)
 
 `kshare` org scope -> Settings -> **Login Behavior and Security**:
 
-- Local authentication allowed: ENABLED (required; v2 loginname page
-  gates the username input on this).
+- Local authentication allowed: ENABLED (required; v2 loginname page gates the username input on this).
 - User Registration: DISABLED.
 - External Login: DISABLED.
-- Passkey Login dropdown: **Allowed**; Force MFA: DISABLED (passkey
-  alone is sufficient).
+- Passkey Login dropdown: **Allowed**; Force MFA: DISABLED (passkey alone is sufficient).
 
-After saves: restart the Zitadel login service on the host (15-min
-login UI cache).
+After saves: restart the Zitadel login service on the host (15-min login UI cache).
 
-## 3 -- User (option B only, fresh-user variant)
+## 3. User (option B only, fresh-user variant)
 
-Skip if you're granting access to an existing user from another org
-(see step 6's cross-org note). Otherwise:
+Skip if you're granting access to an existing user from another org (see step 6's cross-org note).
+Otherwise:
 
-Org -> Users -> **+ New** -> Human user. Username (suffixed with org
-domain), email, "Email verified" CHECKED. **Skip the password section.**
+Org -> Users -> **+ New** -> Human user. Username (suffixed with org domain), email, "Email verified"
+CHECKED. **Skip the password section.**
 
-After save: user detail -> Authenticators -> **Send passkey
-registration link** (requires SMTP configured on your Zitadel host).
-Open the email in a browser and enroll a passkey. Use Solokey direct
-or platform authenticator (TouchID / Windows Hello); avoid
-Bitwarden's passkey impl against Zitadel `userVerification=required`.
+After save: user detail -> Authenticators -> **Send passkey registration link** (requires SMTP configured on
+your Zitadel host). Open the email in a browser and enroll a passkey. Use Solokey direct or platform
+authenticator (TouchID / Windows Hello); avoid Bitwarden's passkey impl against Zitadel
+`userVerification=required`.
 
-## 4 -- Project
+## 4. Project
 
-Org -> Projects -> **+ New** -> name `kshare`. Record the numeric
-**project ID** (needed for the audience pin in `KSHARE_OIDC_AUDIENCE`
-and the per-project role claim URN).
+Org -> Projects -> **+ New** -> name `kshare`. Record the numeric **project ID** (needed for the audience pin
+in `KSHARE_OIDC_AUDIENCE` and the per-project role claim URN).
 
 Project detail page -> Project Settings card:
 
-- Return user roles during authentication (`projectRoleAssertion`):
-  ENABLED. Role claims flow into tokens.
-- Only authorized users can authenticate (`projectRoleCheck`):
-  ENABLED. Denies login if the user has no role on this project.
-- Authentication is restricted to users from organizations...
-  (`hasProjectCheck`): DISABLED (single-org grant; not needed).
+- Return user roles during authentication (`projectRoleAssertion`): ENABLED. Role claims flow into tokens.
+- Only authorized users can authenticate (`projectRoleCheck`): ENABLED. Denies login if the user has no role
+  on this project.
+- Authentication is restricted to users from organizations... (`hasProjectCheck`): DISABLED (single-org
+  grant; not needed).
 
-## 5 -- Role
+## 5. Role
 
 Project -> Roles tab -> **+ New**:
 
@@ -83,26 +72,23 @@ Project -> Roles tab -> **+ New**:
 
 Save. One role only.
 
-## 6 -- Grant role to user
+## 6. Grant role to user
 
 **Same-org user (option A, or option B + fresh user from step 3):**
 
-Project -> **Role Assignments** sidebar -> **+ New** -> select user
--> Continue -> check `upload` -> Save.
+Project -> **Role Assignments** sidebar -> **+ New** -> select user -> Continue -> check `upload` -> Save.
 
 **Cross-org user (option B reusing a user from another org):**
 
-Project -> **User Grants** sidebar (NOT "Role Assignments" — that's
-same-org only) -> **+ New** -> search by username or email
-(`<localpart>@<other-org>.<external-domain>`). As IAM_OWNER you can
-grant across orgs. Select the `upload` role -> Save.
+Project -> **User Grants** sidebar (NOT "Role Assignments", which is same-org only) -> **+ New** -> search by
+username or email (`<localpart>@<other-org>.<external-domain>`). As IAM_OWNER you can grant across orgs.
+Select the `upload` role -> Save.
 
-Verification: the user can log in via device flow, and decoded
-access tokens include
-`urn:zitadel:iam:org:project:<kshare-project-id>:roles` containing
-`upload` — regardless of which org the user lives in.
+Verification: the user can log in via device flow, and decoded access tokens include
+`urn:zitadel:iam:org:project:<kshare-project-id>:roles` containing `upload`, regardless of which org the user
+lives in.
 
-## 7 -- API app `kshare-server` (resource server / audience)
+## 7. API app `kshare-server` (resource server / audience)
 
 Project -> General -> **+ New Application** -> 3-step wizard:
 
@@ -110,18 +96,15 @@ Project -> General -> **+ New Application** -> 3-step wizard:
 - Step 2: Auth Method **JWT (Private Key)**, Continue
 - Step 3: Create
 
-Wizard offers a `key.json` download. **There is no re-download path
-in the v4 console**, so download it now even if you don't strictly
-need it for the resource-server role (the server validates JWTs
-against the issuer's JWKS, not its own private key -- the API app
-exists just to define the audience). Stash for safekeeping at
-`~/.config/kshare/zitadel-server-key.json` (mode 0600).
+Wizard offers a `key.json` download. **There is no re-download path in the v4 console**, so download it now
+even if you don't strictly need it for the resource-server role (the server validates JWTs against the
+issuer's JWKS, not its own private key, so the API app exists just to define the audience). Stash for
+safekeeping at `~/.config/kshare/zitadel-server-key.json` (mode 0600).
 
-Record the **Client ID** from the app detail page header. The
-audience the server validates is the **project ID** (step 4), not
-this client ID.
+Record the **Client ID** from the app detail page header. The audience the server validates is the **project
+ID** (step 4), not this client ID.
 
-## 8 -- Native app `kshare-cli` (device flow)
+## 8. Native app `kshare-cli` (device flow)
 
 Project -> General -> **+ New Application** -> 3-step wizard:
 
@@ -129,73 +112,60 @@ Project -> General -> **+ New Application** -> 3-step wizard:
 - Step 2: Auth Method **Device Code**, Continue
 - Step 3: Create
 
-The wizard creates the app with `grant_types = [device_code]` only;
-that's not enough for a long-lived CLI. **Two post-wizard sections
-need editing.**
+The wizard creates the app with `grant_types = [device_code]` only; that's not enough for a long-lived CLI.
+**Two post-wizard sections need editing.**
 
-### 8a -- OIDC Configuration: add `Refresh Token` to grant types
+### 8a. OIDC Configuration: add `Refresh Token` to grant types
 
 App detail -> top form, "Grant Type" multi-select dropdown:
 
 - Add **Refresh Token** alongside Device Code. Save.
 
-The Console also exposes a "Refresh Token" checkbox below the
-dropdown, but it's **disabled for Device Code apps** (the UI ties it
-to Authorization Code). Use the multi-select directly.
+The Console also exposes a "Refresh Token" checkbox below the dropdown, but it's **disabled for Device Code
+apps** (the UI ties it to Authorization Code). Use the multi-select directly.
 
-Without this, every `kshare` call after the access token's natural
-expiry will fail to refresh with
-`unauthorized_client: grant_type "refresh_token" not allowed` -- the
-canonical Zitadel silent failure for native device-flow apps. The
-rejection happens at the `withClient` middleware in
-`github.com/zitadel/oidc` `pkg/op/server_http.go` via
-`ValidateGrantType`, before the refresh handler even runs.
+Without this, every `kshare` call after the access token's natural expiry will fail to refresh with
+`unauthorized_client: grant_type "refresh_token" not allowed`, the canonical Zitadel silent failure for
+native device-flow apps. The rejection happens at the `withClient` middleware in `github.com/zitadel/oidc`
+`pkg/op/server_http.go` via `ValidateGrantType`, before the refresh handler even runs.
 
-(Note: Zitadel's OIDC server-of-protocol code lives in a separate
-repo, [`github.com/zitadel/oidc`][oidc], imported by the main
-[`github.com/zitadel/zitadel`][zit] application. References below
-prefix the repo where there's any chance of ambiguity.)
+(Note: Zitadel's OIDC server-of-protocol code lives in a separate repo, [`github.com/zitadel/oidc`][oidc],
+imported by the main [`github.com/zitadel/zitadel`][zit] application. References below prefix the repo where
+there's any chance of ambiguity.)
 
 [oidc]: https://github.com/zitadel/oidc
 [zit]: https://github.com/zitadel/zitadel
 
-The `offline_access` scope the CLI requests is necessary but **not
-sufficient**. Issuance and use are gated separately:
+The `offline_access` scope the CLI requests is necessary but **not sufficient**. Issuance and use are gated
+separately:
 
-- **Issuance** -- gated on scope.
-  `github.com/zitadel/zitadel` `internal/api/oidc/device_auth.go::StoreDeviceAuthorization`
-  decides whether to mint a refresh token by checking
-  `slices.Contains(scope, ScopeOfflineAccess)`.
-- **Use** -- gated on the app's `grant_types` allowlist.
-  `github.com/zitadel/oidc` `pkg/op/server_http.go::withClient`
-  rejects up-front;
-  `github.com/zitadel/oidc` `pkg/op/token_refresh.go::AuthorizeRefreshClient`
-  re-checks defensively.
+- **Issuance**: gated on scope. `github.com/zitadel/zitadel`
+  `internal/api/oidc/device_auth.go::StoreDeviceAuthorization` decides whether to mint a refresh token by
+  checking `slices.Contains(scope, ScopeOfflineAccess)`.
+- **Use**: gated on the app's `grant_types` allowlist. `github.com/zitadel/oidc`
+  `pkg/op/server_http.go::withClient` rejects up-front; `github.com/zitadel/oidc`
+  `pkg/op/token_refresh.go::AuthorizeRefreshClient` re-checks defensively.
 
-Two config knobs, both required: `offline_access` in scopes (CLI
-side; see `cmd/cli/auth.go::loginScopes`) AND `refresh_token` in
-the app's grant_types list (Zitadel-side; this step).
+Two config knobs, both required: `offline_access` in scopes (CLI side; see `cmd/cli/auth.go::loginScopes`)
+AND `refresh_token` in the app's grant_types list (Zitadel-side; this step).
 
-### 8b -- Token Settings: AuthToken Options
+### 8b. Token Settings: AuthToken Options
 
 App detail -> **Token Settings** sidebar -> **AuthToken Options** card:
 
-- Auth Token Type dropdown: **JWT** (changes from the default Bearer
-  Token). This must be JWT -- the server verifies the token offline
-  against the JWKS; opaque bearer tokens require introspection RTT
-  to Zitadel per request, which we don't want.
-- Add user roles to the access token: ENABLED. **Critical** -- the
-  middleware reads
-  `urn:zitadel:iam:org:project:<projectID>:roles` from the access
-  token. Without this toggle the role check always denies.
+- Auth Token Type dropdown: **JWT** (changes from the default Bearer Token). This must be JWT: the server
+  verifies the token offline against the JWKS; opaque bearer tokens require introspection RTT to Zitadel per
+  request, which we don't want.
+- Add user roles to the access token: ENABLED. **Critical**, since the middleware reads
+  `urn:zitadel:iam:org:project:<projectID>:roles` from the access token. Without this toggle the role check
+  always denies.
 - User roles inside ID Token: ENABLED (harmless, useful for debug)
 - Include user's profile info in ID Token: ENABLED (harmless)
 - ClockSkew: 0
 
-Save. Record the **Client ID** -- this is what
-`KSHARE_OIDC_CLIENT_ID` points at.
+Save. Record the **Client ID**; this is what `KSHARE_OIDC_CLIENT_ID` points at.
 
-## 9 -- End-to-end verification
+## 9. End-to-end verification
 
 ```bash
 ISSUER=https://auth.example.com
@@ -226,41 +196,30 @@ curl -sX POST $ISSUER/oauth/v2/token \
 echo "<access_token>" | cut -d. -f2 | base64 -d 2>/dev/null | jq
 ```
 
-If step 4 doesn't show the `upload` role under the project-scoped
-URN, the "Add user roles to the access token" toggle in step 8b is
-the most likely culprit (and is the canonical Zitadel silent failure).
+If step 4 doesn't show the `upload` role under the project-scoped URN, the "Add user roles to the access
+token" toggle in step 8b is the most likely culprit (and is the canonical Zitadel silent failure).
 
 ## Common pitfalls
 
-- **Empty loginname form.** `allowLocalAuthentication=false` somewhere
-  in the policy chain (org -> instance fallback). Check all three
-  scopes (org, default org, instance) and restart the login
-  container (`systemctl restart docker-zitadel-login.service`; 15-min
-  cache).
-- **"Send passkey registration link" silently fails.** SMTP is not
-  configured on your Zitadel instance.
-- **Device verification URI routes to legacy v1 login**
-  (`/device?...`) which can't see v2-projected passkeys for
-  org-scoped users. The CLI rewrites the path to
-  `/ui/v2/login/device` before opening the browser
+- **Empty loginname form.** `allowLocalAuthentication=false` somewhere in the policy chain (org -> instance
+  fallback). Check all three scopes (org, default org, instance) and restart the login container
+  (`systemctl restart docker-zitadel-login.service`; 15-min cache).
+- **"Send passkey registration link" silently fails.** SMTP is not configured on your Zitadel instance.
+- **Device verification URI routes to legacy v1 login** (`/device?...`) which can't see v2-projected passkeys
+  for org-scoped users. The CLI rewrites the path to `/ui/v2/login/device` before opening the browser
   (`cmd/cli/auth.go::runLogin`).
-- **Forgot the "Add user roles to access token" toggle.** Step 8b.
-  Without it, role check denies and the user sees
-  `forbidden: missing role upload`.
-- **Forgot to add Refresh Token to grant types.** Step 8a. The Device
-  Code wizard preset only sets `grant_types=[device_code]`. The login
-  succeeds and the CLI gets a refresh token (because `offline_access`
-  is in scopes), but every refresh attempt is rejected by the
-  grant-type allowlist. Symptom: CLI works the day you log in,
-  prints "not logged in" the next morning, every morning. Run
-  `kshare auth status` -- the stderr `auth rejected:` line shows the
-  upstream `unauthorized_client: grant_type "refresh_token" not allowed`.
-- **Audience mismatch.** `KSHARE_OIDC_AUDIENCE` must be the
-  numeric **project ID** (step 4), not the API app's Client ID
-  (step 7). Easy mistake.
-- **Cross-org grant in wrong sidebar.** "Role Assignments" only
-  shows users from the project's own org. To grant a user from a
-  different org, use "User Grants" instead (step 6).
+- **Forgot the "Add user roles to access token" toggle.** Step 8b. Without it, role check denies and the user
+  sees `forbidden: missing role upload`.
+- **Forgot to add Refresh Token to grant types.** Step 8a. The Device Code wizard preset only sets
+  `grant_types=[device_code]`. The login succeeds and the CLI gets a refresh token (because `offline_access`
+  is in scopes), but every refresh attempt is rejected by the grant-type allowlist. Symptom: CLI works the
+  day you log in, prints "not logged in" the next morning, every morning. Run `kshare auth status`; the
+  stderr `auth rejected:` line shows the upstream
+  `unauthorized_client: grant_type "refresh_token" not allowed`.
+- **Audience mismatch.** `KSHARE_OIDC_AUDIENCE` must be the numeric **project ID** (step 4), not the API
+  app's Client ID (step 7). Easy mistake.
+- **Cross-org grant in wrong sidebar.** "Role Assignments" only shows users from the project's own org. To
+  grant a user from a different org, use "User Grants" instead (step 6).
 
 ## What lives where
 

@@ -12,8 +12,7 @@ import (
 	"github.com/kittyandrew/kshare/internal/api"
 )
 
-// runDelete implements `kshare rm <slug>`. Silent on success;
-// one-line stderr error otherwise.
+// runDelete implements `kshare rm <slug>`. Silent on success, one-line stderr error otherwise.
 func runDelete(args []string) {
 	if len(args) != 1 {
 		fmt.Fprintln(os.Stderr, "usage: kshare rm <slug>")
@@ -44,12 +43,10 @@ func runDelete(args []string) {
 		fmt.Fprintf(os.Stderr, "kshare: no such slug %s\n", slug)
 		os.Exit(1)
 	case http.StatusUnauthorized:
-		// Post-refresh 401 means server-side misconfig, not
-		// "log in again." Same routing as doJSON.
+		// A post-refresh 401 is server-side misconfig, not "log in again". Same routing as doJSON.
 		failRequest(server401Err(resp))
 	default:
-		// Pull whatever body the server returned (status messages
-		// are short by design) into the error.
+		// Pull whatever body the server returned into the error; status messages are short by design.
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, errBodyMax))
 		msg := strings.TrimSpace(string(body))
 		if msg == "" {
@@ -58,4 +55,3 @@ func runDelete(args []string) {
 		fail("kshare rm: server returned %s: %s", resp.Status, msg)
 	}
 }
-

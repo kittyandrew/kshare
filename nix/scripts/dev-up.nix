@@ -4,8 +4,7 @@
 }:
 pkgs.writeShellScriptBin "dev-up" ''
   set -euo pipefail
-  # cd to repo root so volume mounts ($(pwd)/...) resolve no matter
-  # which subdir the script was invoked from.
+  # cd to repo root so volume mounts ($(pwd)/...) resolve no matter which subdir this was invoked from.
   cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
   if ! command -v docker &>/dev/null; then
@@ -30,9 +29,8 @@ pkgs.writeShellScriptBin "dev-up" ''
   docker stop kshared 2>/dev/null && docker rm kshared 2>/dev/null || true
 
   echo "[3/3] Starting container ($IMAGE_TAG)..."
-  # Force console-tinted logs in dev for human-readable output. The
-  # CLI constructs public URLs from its persisted server URL, so we
-  # don't need to override any base URL on the server side.
+  # Force console-tinted logs in dev for human-readable output. The CLI builds public URLs from its
+  # persisted server URL, so there is no server-side base URL to override.
   docker run -d \
     --name kshared \
     -p 6980:6980 \

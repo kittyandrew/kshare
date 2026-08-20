@@ -21,25 +21,13 @@ func (s *server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]api.Upload, 0, len(rows))
 	for _, u := range rows {
-		out = append(out, api.Upload{
-			Slug:             u.Slug,
-			Extension:        u.Extension,
-			OriginalFilename: u.OriginalFilename,
-			Size:             u.Size,
-			ContentType:      u.ContentType,
-			UploadedAt:       u.UploadedAt,
-			ExpiresAt:        u.ExpiresAt(),
-		})
+		out = append(out, toAPI(u))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-// handleDeleteFile implements DELETE /api/files/{slug}.
-// Order: validate slug -> SELECT row -> DELETE row -> remove file
-// -> 204. The DB DELETE runs BEFORE the file remove so a crash
-// between the two leaves the file unreferenced (boot reconcile reap
-// catches it) and not a row pointing at nothing.
+// handleDeleteFile deletes the row first, then the file; store.DeleteBySlug documents why that order.
 func (s *server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	log := zerolog.Ctx(ctx)
@@ -81,23 +69,18 @@ func (s *server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleReplaceFile implements PUT /api/files/{slug}. Slug is the
-// only stable identity across replacements; the public URL is
-// unchanged. On-disk extension follows the new filename.
-// TTL resets from X-KShare-TTL (or server DEFAULT_TTL if absent).
-// Content-type is re-sniffed from new bytes.
+// handleReplaceFile implements PUT /api/files/{slug}. Slug is the only stable identity across replacements,
+// so the public URL never changes; the on-disk extension follows the new filename, TTL resets from
+// X-KShare-TTL (or DEFAULT_TTL), and content-type is re-sniffed from the new bytes.
 //
 // Atomicity contract:
-//  1. Stream new content to a nonce-named .partial. The live file
-//     (old content) is untouched.
-//  2. UPDATE the DB row. On failure, remove the .partial; old state
-//     intact.
+//  1. Stream new content to a nonce-named .partial. The live file (old content) is untouched.
+//  2. UPDATE the DB row. On failure, remove the .partial; old state intact.
 //  3. After UPDATE commits, rename .partial -> <slug><newExt>.
 //  4. If newExt != oldExt, best-effort remove the old <slug><oldExt>.
 //
-// Crash recovery: a .partial left from steps 1-2 is reaped by the
-// boot scanner. A committed file with an UPDATE-but-no-rename gap
-// is recovered by boot ReconcileFiles.
+// Crash recovery: a .partial left from steps 1-2 is reaped at boot, and a committed file with an
+// UPDATE-but-no-rename gap is recovered by ReconcileFiles.
 func (s *server) handleReplaceFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	log := zerolog.Ctx(ctx)
@@ -125,17 +108,16 @@ func (s *server) handleReplaceFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	oldDiskName := u.DiskName()
-	newDiskName := slug + in.Extension
-	uploadedAt := time.Now().UTC()
-	if err := s.container.ReplaceContent(ctx, &store.Upload{
+	updated := &store.Upload{
 		Slug:             slug,
 		Extension:        in.Extension,
 		OriginalFilename: in.OriginalFilename,
 		ContentType:      in.ContentType,
 		Size:             size,
-		UploadedAt:       uploadedAt,
+		UploadedAt:       time.Now().UTC(),
 		TTL:              in.TTL,
-	}); err != nil {
+	}
+	if err := s.container.ReplaceContent(ctx, updated); err != nil {
 		_ = s.container.RemoveFile(partialName)
 		if errors.Is(err, store.ErrNotFound) {
 			httpError(ctx, w, http.StatusNotFound, "not found", nil)
@@ -145,17 +127,17 @@ func (s *server) handleReplaceFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.container.RenameFile(partialName, newDiskName); err != nil {
+	if err := s.container.RenameFile(partialName, updated.DiskName()); err != nil {
 		log.Error().Err(err).
 			Str("slug", slug).
 			Str("partial", partialName).
-			Str("new_disk_name", newDiskName).
+			Str("new_disk_name", updated.DiskName()).
 			Msg("replace: rename failed after UPDATE committed; row + content drift")
 		httpError(ctx, w, http.StatusInternalServerError, "promote partial", err)
 		return
 	}
 
-	if in.Extension != u.Extension {
+	if updated.Extension != u.Extension {
 		if err := s.container.RemoveFile(oldDiskName); err != nil {
 			log.Warn().Err(err).Str("old_disk_name", oldDiskName).
 				Msg("replace: failed to remove old-extension file (orphan)")
@@ -163,15 +145,15 @@ func (s *server) handleReplaceFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Info().
-		Str("slug", slug).
+		Str("slug", updated.Slug).
 		Str("old_disk_name", oldDiskName).
-		Str("new_disk_name", newDiskName).
-		Str("original_filename", in.OriginalFilename).
-		Int64("size", size).
-		Str("content_type", in.ContentType).
-		Dur("ttl", in.TTL).
+		Str("new_disk_name", updated.DiskName()).
+		Str("original_filename", updated.OriginalFilename).
+		Int64("size", updated.Size).
+		Str("content_type", updated.ContentType).
+		Dur("ttl", updated.TTL).
 		Str("subject", subjectFromCtx(ctx)).
 		Msg("upload replaced")
 
-	writeUploadJSON(w, slug, in, size, uploadedAt)
+	writeUploadJSON(w, updated)
 }

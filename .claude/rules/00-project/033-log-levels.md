@@ -5,8 +5,7 @@ custom-line-limit: 150
 ---
 
 # logging - When to use the different log levels - Stack Overflow
-<!-- Location: .claude/rules/00-project/033-log-levels.md -- external reference,
-     update by re-fetching from source URL. -->
+<!-- .claude/rules/00-project/033-log-levels.md: external reference, refresh by re-fetching from source URL -->
 
 Quite broad question. So more than one answer is possible, depending on the actual circumstances of logging. Someone will miss `notice` in this collection someone will not ...
 

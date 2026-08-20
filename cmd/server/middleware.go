@@ -11,9 +11,12 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// withRequestLogger is the outermost middleware: enriches per-request
-// context with a logger that has method + path baked in. Downstream
-// handlers pull from `zerolog.Ctx(r.Context())` for correlated lines.
+// withRequestLogger is the outermost middleware: every downstream zerolog.Ctx(r.Context()) already carries
+// method, path and req_id, so handlers must not re-log those fields.
+//
+// The id also goes on the context, not just the response header. http.TimeoutHandler hands its inner handler
+// a private header map and only merges it back on the way out, so a handler reading X-Request-Id off its own
+// ResponseWriter sees "" on every route that has a timeout wrapper.
 func withRequestLogger(root zerolog.Logger, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqID := newRequestID()
@@ -22,27 +25,29 @@ func withRequestLogger(root zerolog.Logger, h http.Handler) http.Handler {
 			Str("path", r.URL.Path).
 			Str("req_id", reqID).
 			Logger()
-		ctx := l.WithContext(r.Context())
+		ctx := context.WithValue(l.WithContext(r.Context()), reqIDCtxKey{}, reqID)
 		w.Header().Set("X-Request-Id", reqID)
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
+type reqIDCtxKey struct{}
+
+func reqIDFromCtx(ctx context.Context) string {
+	id, _ := ctx.Value(reqIDCtxKey{}).(string)
+	return id
+}
+
 // httpError centralises the 4xx/5xx response path.
 //
-//   - 4xx: `body` is sent to the client verbatim (caller-shaped
-//     bugs need to know what's wrong). `err` is optional; when set,
-//     it's logged via .Err() so `errors.Is/As` post-hoc still works.
-//   - 5xx: body is redacted to "internal server error (req_id=...)";
-//     the log captures `body` as the failure label + `err` via .Err()
-//     so internal paths/state never leak to remote callers but the
-//     error chain is preserved for diagnostics.
+//   - 4xx: `body` goes to the client verbatim, since caller-shaped bugs need to know what's wrong. `err` is
+//     optional; when set it is logged via .Err() so errors.Is/As still work after the fact.
+//   - 5xx: the body is redacted to "internal server error (req_id=...)" while the log keeps `body` as the
+//     failure label and `err` as the chain, so internal paths never leak to remote callers.
 func httpError(ctx context.Context, w http.ResponseWriter, status int, body string, err error) {
 	log := zerolog.Ctx(ctx)
 	if status >= http.StatusInternalServerError {
-		// withRequestLogger always sets X-Request-Id on every
-		// request, so we just read it back here.
-		reqID := w.Header().Get("X-Request-Id")
+		reqID := reqIDFromCtx(ctx)
 		ev := log.Error().Str("event", "http_error").Int("status", status).
 			Str("label", body).Str("req_id", reqID)
 		if err != nil {
@@ -60,11 +65,8 @@ func httpError(ctx context.Context, w http.ResponseWriter, status int, body stri
 	http.Error(w, body, status)
 }
 
-// newRequestID returns a short hex correlation ID. Used for log/header
-// pairing; crypto/rand failure is vanishingly rare on Linux but would
-// produce all-zeros IDs that mis-correlate every request with the
-// same log line. Falls back to a timestamp-derived ID so correlation
-// stays per-request even when crypto/rand is wedged.
+// newRequestID returns a short hex correlation ID. A wedged crypto/rand would hand every request the same
+// all-zero ID and collapse the logs into one stream, so fall back to the clock.
 func newRequestID() string {
 	var b [6]byte
 	if _, err := rand.Read(b[:]); err != nil {

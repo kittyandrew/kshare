@@ -2,9 +2,7 @@
   pkgs,
   dev-down,
 }:
-# dev-clean = dev-down + wipe state. Composes dev-down so the
-# `docker stop kshared` / `docker rm kshared` logic stays in exactly
-# one place (dev-down).
+# Composes dev-down so the `docker stop` / `docker rm` logic stays in exactly one place.
 pkgs.writeShellScriptBin "dev-clean" ''
   set -euo pipefail
   cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"

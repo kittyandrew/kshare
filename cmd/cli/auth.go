@@ -1,8 +1,4 @@
-// CLI-side OIDC: RFC 8628 device-flow login, token persistence,
-// refresh-on-expiry, bearer-header attachment. Tokens live in
-// ${XDG_CONFIG_HOME}/kshare/auth.json (mode 0600). The server URL,
-// issuer, client_id, audience are all persisted alongside the tokens
-// so subsequent CLI calls + token refresh don't need the env again.
+// CLI-side OIDC: RFC 8628 device flow, with tokens at ${XDG_CONFIG_HOME}/kshare/auth.json (mode 0600).
 package main
 
 import (
@@ -23,11 +19,9 @@ import (
 	"github.com/zitadel/oidc/v3/pkg/oidc"
 )
 
-// tokenFile is the on-disk schema. The IdP config (issuer, client_id,
-// audience) plus the server URL are persisted so refresh + later
-// commands work without re-reading the env -- and so multiple
-// concurrent CLIs can't disagree about which server or IdP they're
-// talking to.
+// tokenFile is the on-disk schema. The IdP config (issuer, client_id, audience) plus the server URL are
+// persisted so refresh and later commands work without re-reading the env, and so two concurrent CLIs can't
+// disagree about which server or IdP they are talking to.
 type tokenFile struct {
 	Issuer       string    `json:"issuer"`
 	ClientID     string    `json:"client_id"`
@@ -38,9 +32,8 @@ type tokenFile struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
-// expired returns true if the access token is past or within 30s of
-// its expiry. The grace window keeps long-running operations from
-// faceplanting on a token that was good when the call started.
+// expired reports whether the access token is past, or within 30s of, its expiry. The grace window keeps a
+// long-running operation from faceplanting on a token that was good when the call started.
 func (t *tokenFile) expired() bool {
 	return time.Now().After(t.ExpiresAt.Add(-30 * time.Second))
 }
@@ -69,13 +62,10 @@ func loadTokens() (*tokenFile, error) {
 	return &t, nil
 }
 
-// @NOTE: not atomic against concurrent writers (no flock, no temp +
-// rename). kshare's scope is single-uploader per .claude/rules/001-architecture.md;
-// two simultaneous refreshes from the same user are a deliberate
-// foot-gun we accept (parallel `kshare upload &` invocations can race
-// and trip Zitadel's refresh-token reuse-detection, see the third
-// failure mode noted in ensureFreshAccessToken). Revisit if/when the
-// scope changes.
+// @NOTE: not atomic against concurrent writers (no flock, no temp + rename). kshare is single-uploader per
+// .claude/rules/001-architecture.md, so two simultaneous refreshes are a foot-gun we accept: parallel
+// `kshare upload &` invocations can race and trip Zitadel's refresh-token reuse detection (see the third
+// failure mode in ensureFreshAccessToken). Revisit if the scope ever changes.
 func saveTokens(t *tokenFile) error {
 	p, err := tokenPath()
 	if err != nil {
@@ -102,10 +92,9 @@ func deleteTokens() error {
 	return nil
 }
 
-// loginScopes is the set requested in the device flow. The audience
-// URN pins the project id into the resulting token's aud[] (so the
-// server can audience-check); the roles URN ensures the project role
-// claim is asserted on the token.
+// loginScopes is the set requested in the device flow. The audience URN pins the project id into the
+// resulting token's aud[] so the server can audience-check it; the roles URN makes Zitadel assert the
+// project role claim.
 func loginScopes(audience string) []string {
 	return []string{
 		"openid",
@@ -115,14 +104,29 @@ func loginScopes(audience string) []string {
 	}
 }
 
-// runLogin runs the RFC 8628 device authorization flow against the
-// configured Zitadel issuer and persists the resulting tokens.
-// Reads OIDC config from env (KSHARE_OIDC_ISSUER + _CLIENT_ID +
-// _AUDIENCE -- mandatory). Server URL is the explicit --server flag
-// (defaults to http://localhost:6980 for local dev; pass the public
-// hostname for production).
+const localServerURL = "http://localhost:6980"
+
+// defaultServerURL exists so a packaged CLI can be wrapped with $KSHARE_SERVER instead of shipping a shell
+// script that injects --server (see docs/deployment.md).
+func defaultServerURL() string {
+	if s := os.Getenv("KSHARE_SERVER"); s != "" {
+		return s
+	}
+	return localServerURL
+}
+
+// validServerURL gates both --server and $KSHARE_SERVER. Anything looser than an absolute http(s) URL
+// (`localhost:6980`, a bare hostname) would persist into auth.json and resurface as a cryptic later error.
+func validServerURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+// runLogin drives the device flow against the Zitadel issuer in the env (KSHARE_OIDC_ISSUER + _CLIENT_ID +
+// _AUDIENCE, all mandatory) and persists the tokens. The server URL is frozen into auth.json here: later
+// commands read it from there, so a stray env var can't redirect an upload after the fact.
 func runLogin(args []string) {
-	server := "http://localhost:6980"
+	server := defaultServerURL()
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--server":
@@ -132,23 +136,18 @@ func runLogin(args []string) {
 			server = args[i+1]
 			i++
 		case "-h", "--help":
-			fmt.Fprintln(os.Stderr, "usage: kshare auth login [--server URL]")
+			fmt.Fprintf(os.Stderr, "usage: kshare auth login [--server URL]   (default: $KSHARE_SERVER, else %s)\n", localServerURL)
 			os.Exit(0)
 		default:
 			fail("kshare auth login: unknown argument %q", args[i])
 		}
 	}
 
-	// Validate --server is an absolute http(s) URL. Reject silently
-	// passing `localhost:6980` (no scheme) etc. -- those persist as
-	// nonsense and surface as cryptic errors on later commands.
-	u, err := url.Parse(server)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		fail("kshare auth login: --server must be an absolute http(s) URL, got %q", server)
+	if !validServerURL(server) {
+		fail("kshare auth login: server must be an absolute http(s) URL, got %q", server)
 	}
 
-	// Normalise URL inputs once, here, so nothing downstream has to
-	// re-defend against trailing slashes.
+	// Normalise URL inputs once, here, so nothing downstream has to re-defend against trailing slashes.
 	issuer := strings.TrimRight(os.Getenv("KSHARE_OIDC_ISSUER"), "/")
 	clientID := os.Getenv("KSHARE_OIDC_CLIENT_ID")
 	audience := os.Getenv("KSHARE_OIDC_AUDIENCE")
@@ -171,14 +170,10 @@ func runLogin(args []string) {
 		fail("kshare auth login: device authorization: %v", err)
 	}
 
-	// @NOTE: zitadel-specific. Zitadel's device_authorization_endpoint
-	// returns verification URLs pointing at the legacy v1 login UI
-	// (/device, /ui/login/), which has known WebAuthn projection bugs
-	// for org-scoped users. We bypass by constructing the v2 path
-	// from the issuer base. A future port to a different OIDC
-	// provider (Authelia, Keycloak, Dex) needs this gone -- see
-	// docs/decisions/2026-05-17-device-code-vs-pkce.md for the
-	// broader portability discussion.
+	// @NOTE: zitadel-specific. Zitadel's device_authorization_endpoint returns verification URLs pointing at
+	// the legacy v1 login UI (/device, /ui/login/), which has known WebAuthn projection bugs for org-scoped
+	// users, so construct the v2 path from the issuer base instead. A port to another OIDC provider
+	// (Authelia, Keycloak, Dex) needs this gone; see docs/decisions/2026-05-17-device-code-vs-pkce.md.
 	verify := issuer + "/ui/v2/login/device?user_code=" + url.QueryEscape(da.UserCode)
 	fmt.Fprintf(os.Stderr, "kshare: open %s\n", verify)
 	fmt.Fprintf(os.Stderr, "kshare: code %s\n", da.UserCode)
@@ -210,20 +205,14 @@ func runLogout() {
 	fmt.Fprintln(os.Stderr, "kshare: logged out")
 }
 
-// runStatus prints the current auth state: server URL, IdP config,
-// token expiry, and the result of a real bearer-gated request
-// against the server. Local-only checks (clock-based expiry) can
-// pass while the token is actually un-verifiable -- this is how we
-// caught the Zitadel "Auth Token Type: Bearer" misconfig where the
-// CLI receives a JWE that the server can't parse as a JWT.
+// runStatus prints the login state and then makes a real bearer-gated request. Clock-based expiry can look
+// fine while the token is un-verifiable, which is how the Zitadel "Auth Token Type: Bearer" misconfig
+// surfaced: the CLI receives a JWE the server can't parse as a JWT.
 //
-// The refresh runs BEFORE the token line is printed so the displayed
-// expiry reflects the post-refresh state -- otherwise users see the
-// confusing "token: expired ... api: ok" pair that hints at a bug
-// where there isn't one. On refresh failure we show the on-disk
-// expiry and route the skipped-reason on the error type, so the
-// "see stderr" hint only appears when there's actually something on
-// stderr.
+// The refresh runs BEFORE the token line prints, so the displayed expiry reflects the post-refresh state;
+// otherwise users see a confusing "token: expired ... api: ok" pair that hints at a bug where there is none.
+// On refresh failure we show the on-disk expiry and route the skipped-reason on the error type, so the "see
+// stderr" hint only appears when there is actually something on stderr.
 func runStatus() {
 	t, err := loadTokens()
 	if err != nil {
@@ -239,29 +228,24 @@ func runStatus() {
 	fmt.Printf("audience:  %s\n", t.Audience)
 	fmt.Printf("client_id: %s\n", t.ClientID)
 
-	// Parent ctx watches SIGINT so Ctrl-C cancels a hung JWKS or
-	// probe roundtrip cleanly; without this the user waits out the
-	// full 8s/5s budgets. Refresh and probe each get their own
-	// derived timeout so a slow refresh can't starve the probe.
-	// 8s for refresh covers cold-JWKS + IdP roundtrip on a typical
-	// link; 5s for the probe is enough for a single GET against
-	// the configured server.
+	// The parent ctx watches SIGINT so Ctrl-C cancels a hung JWKS or probe roundtrip cleanly; without it the
+	// user waits out the full 8s/5s budgets. Refresh and probe each get their own derived timeout so a slow
+	// refresh can't starve the probe: 8s covers cold-JWKS plus an IdP roundtrip on a typical link, and 5s is
+	// enough for a single GET against the configured server.
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	refreshCtx, refreshCancel := context.WithTimeout(rootCtx, 8*time.Second)
 	defer refreshCancel()
 	fresh, err := ensureFreshAccessToken(refreshCtx, t)
 	if err != nil {
-		// Stdout block first so the structured status output stays
-		// coherent; stderr diagnostic last so terminal-buffering
-		// quirks don't interleave it into the middle of the
-		// stdout block.
+		// Stdout block first so the structured status output stays coherent, stderr diagnostic last so
+		// terminal buffering can't interleave it into the middle of that block.
 		printTokenLine(t)
 		switch {
 		case errors.Is(err, errNotLoggedIn):
 			fmt.Println("api:       skipped (no usable tokens; run `kshare auth login`)")
 		case errors.Is(err, errRefreshFailed):
-			fmt.Println("api:       skipped (auth rejected -- see stderr)")
+			fmt.Println("api:       skipped (auth rejected; see stderr)")
 			printRefreshError(err)
 		default:
 			fmt.Printf("api:       skipped (%v)\n", err)
@@ -274,9 +258,6 @@ func runStatus() {
 	fmt.Printf("api:       %s\n", probeAPI(probeCtx, fresh))
 }
 
-// printTokenLine prints the one-line summary of the access token's
-// expiry state. Pulled out of runStatus so both the refresh-succeeded
-// (`fresh`) and refresh-failed (on-disk `t`) branches can use it.
 func printTokenLine(t *tokenFile) {
 	left := time.Until(t.ExpiresAt).Round(time.Second)
 	freshness := "valid"
@@ -287,23 +268,10 @@ func printTokenLine(t *tokenFile) {
 		freshness, t.ExpiresAt.Local().Format(time.RFC3339), humanLeft(left))
 }
 
-// probeAPI sends a GET /api/files against the configured server.
-// Returns a one-line human-readable status. Five outcomes:
-//
-//   - 2xx: "ok"
-//   - Network error: "unreachable: <err>"
-//   - 401: server rejected an otherwise-fresh token. Common causes
-//     (in rough order of likelihood the first time you see this):
-//     audience mismatch between server/IdP config; Zitadel
-//     `kshare-cli` Auth Token Type reverted from JWT to Bearer;
-//     server-side clock skew beyond JWT nbf/exp tolerance. The
-//     server's response body carries the reason; we surface it.
-//   - 403: "forbidden: missing role <role>" -- server's own text.
-//   - Other non-2xx: status line + body excerpt.
-//
-// Context flows in from the caller so Ctrl-C cancels cleanly. Body
-// is capped at 256B; the server's libserv-shaped responses are
-// short by design.
+// probeAPI sends a GET /api/files and renders the outcome in one line. A 401 here means the server rejected
+// an otherwise-fresh token; likeliest causes, in rough order: audience mismatch between server and IdP
+// config, Zitadel `kshare-cli` Auth Token Type reverted from JWT to Bearer, or server-side clock skew beyond
+// JWT nbf/exp tolerance. The server's own text carries the reason, capped at 256B since kshared's is short.
 func probeAPI(ctx context.Context, t *tokenFile) string {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.Server+"/api/files", nil)
 	if err != nil {
@@ -323,12 +291,11 @@ func probeAPI(ctx context.Context, t *tokenFile) string {
 	if msg == "" {
 		msg = resp.Status
 	}
-	return fmt.Sprintf("FAIL (%d) -- %s", resp.StatusCode, msg)
+	return fmt.Sprintf("FAIL (%d): %s", resp.StatusCode, msg)
 }
 
-// humanLeft formats a duration for status output. The caller's
-// "freshness" label ("valid" / "expired") already carries the sign
-// information; humanLeft just renders magnitude + direction.
+// humanLeft formats a duration for status output. The caller's "valid" / "expired" label already carries the
+// sign, so this renders magnitude plus direction.
 func humanLeft(d time.Duration) string {
 	if d < 0 {
 		return (-d).String() + " ago"
@@ -336,26 +303,19 @@ func humanLeft(d time.Duration) string {
 	return "in " + d.String()
 }
 
-// ensureFreshAccessToken refreshes a pre-loaded token if expired,
-// persists the rotated set, and returns the (possibly-refreshed)
-// token. The caller is responsible for loading -- splitting the load
-// out lets runStatus reuse its already-loaded tokenFile (avoiding a
-// race window where auth.json changes between two reads) and keeps
-// this function purely about the refresh exchange.
+// ensureFreshAccessToken refreshes a pre-loaded token if it expired, persists the rotated set, and returns
+// the (possibly refreshed) token. Loading is the caller's job, which lets runStatus reuse its already-loaded
+// tokenFile instead of reading auth.json twice and racing itself.
 //
 // Return contract:
-//   - (t, nil) on success (either no refresh needed, or refresh succeeded).
+//   - (t, nil) on success, whether or not a refresh was needed.
 //   - (nil, errNotLoggedIn) if the loaded tokens have no refresh_token.
-//   - (nil, joined-with-errRefreshFailed) for any failure during the
-//     refresh exchange itself: OIDC discovery, the refresh-grant POST,
-//     or persisting the rotated tokens. The upstream error is joined
-//     via errors.Join so callers can errors.As(*oidc.Error) when they
-//     need to surface ErrorType / Description programmatically.
+//   - (nil, joined-with-errRefreshFailed) for any failure in the refresh exchange itself: OIDC discovery,
+//     the refresh-grant POST, or persisting the rotated tokens. The upstream error is joined via errors.Join
+//     so callers can errors.As(*oidc.Error) for ErrorType / Description.
 //
-// Callers are expected to route errRefreshFailed through
-// printRefreshError (in main.go) so the upstream detail lands on
-// stderr exactly once, regardless of which CLI subcommand triggered
-// the refresh.
+// Callers route errRefreshFailed through printRefreshError (main.go) so the upstream detail lands on stderr
+// exactly once, whichever subcommand triggered the refresh.
 func ensureFreshAccessToken(ctx context.Context, t *tokenFile) (*tokenFile, error) {
 	if !t.expired() {
 		return t, nil
@@ -365,24 +325,20 @@ func ensureFreshAccessToken(ctx context.Context, t *tokenFile) (*tokenFile, erro
 	}
 	relying, err := rp.NewRelyingPartyOIDC(ctx, t.Issuer, t.ClientID, "", "", loginScopes(t.Audience))
 	if err != nil {
-		// IdP-side problem (JWKS unreachable, discovery doc broken);
-		// re-login won't fix it. Route through errRefreshFailed so the
-		// caller's "fix the upstream cause" hint applies.
+		// IdP-side problem (JWKS unreachable, discovery doc broken); re-login won't fix it. Route through
+		// errRefreshFailed so the caller's "fix the upstream cause" hint applies.
 		return nil, errors.Join(errRefreshFailed, fmt.Errorf("oidc init: %w", err))
 	}
 	refreshed, err := rp.RefreshTokens[*oidc.IDTokenClaims](ctx, relying, t.RefreshToken, "", "")
 	if err != nil {
 		// Three common upstream causes, each needing a different fix:
-		//   - "unauthorized_client: grant_type \"refresh_token\" not
-		//     allowed" -> `kshare-cli` app missing Refresh Token in
-		//     Grant Types (docs/zitadel.md step 8a)
-		//   - "invalid_grant: token expired" -> Refresh Token Lifetime
-		//     lapsed; re-login required
-		//   - "invalid_grant: token (id ...) was already used" ->
-		//     reuse detection invalidated the family (concurrent CLI)
-		// Surfacing is the caller's job: failRequest in main.go calls
-		// printRefreshError which extracts the OIDC error via
-		// errors.As and prints to stderr exactly once per upload.
+		//   - `unauthorized_client: grant_type "refresh_token" not allowed`: the `kshare-cli` app is missing
+		//     Refresh Token in Grant Types (docs/zitadel.md step 8a)
+		//   - `invalid_grant: token expired`: Refresh Token Lifetime lapsed, so re-login is required
+		//   - `invalid_grant: token (id ...) was already used`: reuse detection invalidated the family,
+		//     which a concurrent CLI can cause
+		// Surfacing is the caller's job: failRequest calls printRefreshError, which extracts the OIDC error
+		// via errors.As and prints it to stderr exactly once per upload.
 		return nil, errors.Join(errRefreshFailed, err)
 	}
 	t.AccessToken = refreshed.AccessToken
@@ -391,8 +347,7 @@ func ensureFreshAccessToken(ctx context.Context, t *tokenFile) (*tokenFile, erro
 	}
 	t.ExpiresAt = refreshed.Expiry
 	if t.ExpiresAt.IsZero() {
-		// oauth2.Token sets Expiry from ExpiresIn when present; fall
-		// back to a conservative 5min if the response was thin.
+		// oauth2.Token sets Expiry from ExpiresIn; fall back to a conservative 5 min if it was absent.
 		t.ExpiresAt = time.Now().Add(5 * time.Minute)
 	}
 	if err := saveTokens(t); err != nil {
@@ -401,23 +356,17 @@ func ensureFreshAccessToken(ctx context.Context, t *tokenFile) (*tokenFile, erro
 	return t, nil
 }
 
-// errNotLoggedIn marks the absence of usable persisted credentials --
-// no auth.json on disk, or an auth.json with no refresh_token. The fix
-// is `kshare auth login`. Distinct from errRefreshFailed: there's no
-// upstream error to surface, just "log in."
+// errNotLoggedIn marks the absence of usable persisted credentials: no auth.json on disk, or an auth.json
+// with no refresh_token. The fix is `kshare auth login`. Distinct from errRefreshFailed because there is no
+// upstream error to surface, just "log in".
 var errNotLoggedIn = errors.New("not logged in")
 
-// errRefreshFailed marks an auth-layer rejection that re-login alone
-// won't fix: the IdP refused the refresh grant (grant-type misconfig,
-// expired refresh-token-lifetime, reuse-detection family
-// invalidation), OR the server rejected an otherwise-fresh token
-// (audience mismatch, JWT vs Bearer setting reverted, clock skew).
-// In both cases, telling the user to re-log in mints another
-// identically-broken token; the fix is upstream of the CLI.
+// errRefreshFailed marks an auth-layer rejection that re-login alone won't fix: the IdP refused the refresh
+// grant (grant-type misconfig, expired refresh-token lifetime, reuse-detection family invalidation), or the
+// server rejected an otherwise-fresh token (audience mismatch, JWT vs Bearer setting reverted, clock skew).
+// Either way, logging in again mints another identically-broken token; the fix is upstream of the CLI.
 //
-// Invariant: this sentinel is always joined (via errors.Join) with the
-// underlying error so callers can errors.As(*oidc.Error) the inner
-// cause. printRefreshError in main.go is the canonical surfacing
-// helper; runStatus and failRequest both call it.
+// Invariant: this sentinel is always joined (via errors.Join) with the underlying error, so callers can
+// errors.As(*oidc.Error) the inner cause. printRefreshError in main.go is the canonical surfacing helper;
+// runStatus and failRequest both call it.
 var errRefreshFailed = errors.New("auth rejected")
-

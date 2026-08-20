@@ -50,11 +50,11 @@ func TestServeFile_404_NoRow(t *testing.T) {
 func TestServeFile_404_BadFormat(t *testing.T) {
 	s := testServer(t)
 	for _, bad := range []string{
-		"short",           // < 8 chars
-		"toolong9chars",   // > 8 chars
-		"aaa//bbb",        // path separator
-		"abcdefgh.html",   // extension in URL not allowed; URL is slug-only
-		"abcd!fgh",        // invalid char
+		"short",         // < 8 chars
+		"toolong9chars", // > 8 chars
+		"aaa//bbb",      // path separator
+		"abcdefgh.html", // extension in URL not allowed; URL is slug-only
+		"abcd!fgh",      // invalid char
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/s/"+bad, nil)
 		req = withPathValue(req, "slug", bad)
@@ -110,8 +110,7 @@ func TestClientIP(t *testing.T) {
 	}
 }
 
-// TestServeFile_AfterDelete checks that a deleted slug 404s on /s/
-// (sanity check for the order-of-operations in delete handler).
+// TestServeFile_AfterDelete checks that a deleted slug 404s on /s/, covering the delete handler's ordering.
 func TestServeFile_AfterDelete(t *testing.T) {
 	s := testServer(t)
 	resp := seedUpload(t, s, "delme.txt", "going away")
@@ -135,8 +134,7 @@ func TestServeFile_AfterDelete(t *testing.T) {
 	}
 }
 
-// TestUploadJSONShape verifies the JSON response shape is stable
-// (catch field renames that break the CLI).
+// TestUploadJSONShape verifies the JSON response shape is stable, catching field renames that break the CLI.
 func TestUploadJSONShape(t *testing.T) {
 	s := testServer(t)
 	req := newUploadRequest(http.MethodPost, "/api/upload", "1h", "test.html", "<h1>hi</h1>")

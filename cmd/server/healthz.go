@@ -10,11 +10,9 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// handleHealthz is the unauthenticated liveness + readiness probe.
-// Probes DB + files-dir under a 1s ceiling. Catches wedged WAL /
-// disk-full / mount-gone -- failure modes that would let the bare
-// process answer 200 while every upload 500s. If SQLite can't
-// answer a no-op SELECT in 1s, the service genuinely isn't healthy.
+// handleHealthz is the unauthenticated liveness + readiness probe. DB ping + files-dir stat under a 1s
+// ceiling, which is what catches wedged WAL / disk-full / mount-gone: failure modes that let the bare
+// process answer 200 while every upload 500s.
 func (s *server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 1*time.Second)
 	defer cancel()

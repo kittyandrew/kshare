@@ -5,8 +5,7 @@ custom-line-limit: 210
 ---
 
 # Beeper Go Guidelines
-<!-- Location: .claude/rules/00-project/031-beeper-go.md -- external reference, update
-     by re-fetching from source URL. -->
+<!-- .claude/rules/00-project/031-beeper-go.md: external reference, refresh by re-fetching from source URL -->
 
 The goal of this document is to describe how Beeper writes Go code. This includes code style, library choices, and other important guidelines.
 

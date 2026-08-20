@@ -12,9 +12,7 @@ import (
 	"github.com/kittyandrew/kshare/internal/api"
 )
 
-// runList implements `kshare ls [--json]`. Default output is a
-// column-aligned table; --json dumps the raw API response so
-// scripts can pipe through jq.
+// runList implements `kshare ls [--json]`, where --json dumps the raw API response for piping through jq.
 func runList(args []string) {
 	jsonOut := false
 	for _, a := range args {
@@ -60,10 +58,7 @@ func runList(args []string) {
 	for _, r := range rows {
 		original := r.OriginalFilename
 		if original == "" {
-			// Defense: a row predating original_filename or with the
-			// uploader's filename stripped should still render
-			// recognisably. Fall back to the slug + extension.
-			original = r.Slug + r.Extension
+			original = r.Slug + r.Extension // original_filename can be "": omitted or sanitised away
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
 			r.Slug,
@@ -75,9 +70,8 @@ func runList(args []string) {
 	_ = tw.Flush()
 }
 
-// humanBytes renders a byte count as a short human string. Bounded
-// at exp 5 (E = exabytes); int64's max is just under 8 EiB so we
-// won't index off the end of the suffix table.
+// humanBytes renders a byte count as a short human string. Bounded at exp 5 (E = exabytes); int64 maxes out
+// just under 8 EiB, so the suffix table can't be indexed off the end.
 func humanBytes(n int64) string {
 	const unit = 1024
 	if n < unit {
@@ -92,8 +86,7 @@ func humanBytes(n int64) string {
 	return fmt.Sprintf("%.1f%c", float64(n)/float64(div), suffixes[exp])
 }
 
-// humanUntil renders a duration to expiry. Past-expiry rows are
-// labelled "expired" (the sweeper will reap them on the next tick).
+// humanUntil renders time-to-expiry. Past-expiry rows read "expired"; the sweeper reaps them next tick.
 func humanUntil(now, t time.Time) string {
 	d := t.Sub(now)
 	if d <= 0 {

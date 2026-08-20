@@ -1,5 +1,5 @@
 {
-  description = "kshare -- OIDC-gated single-uploader file share";
+  description = "kshare: OIDC-gated single-uploader file share";
 
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
@@ -11,22 +11,18 @@
 
     perSystem = system: let
       pkgs = nixpkgs.legacyPackages.${system};
-      # CalVer: vYY.MM derived from the flake's source modification
-      # date. `self.lastModifiedDate` is "YYYYMMDDhhmmss". May 2026
-      # builds report `v26.05`. Operator-managed release tags follow
-      # an expanded semver shape: `v0.YYMM.Z` (e.g. `v0.2605.0`) so
-      # `git tag --sort=v:refname` orders cleanly across both. See
-      # docs/deployment.md::OCI image for the tag-shape rationale.
+      # CalVer: vYY.MM derived from the flake's source modification date. `self.lastModifiedDate` is
+      # "YYYYMMDDhhmmss", so a May 2026 build reports `v26.05`. Operator-managed release tags use an
+      # expanded semver shape, `v0.YYMM.Z` (e.g. `v0.2605.0`), so `git tag --sort=v:refname` orders cleanly
+      # across both. See docs/deployment.md::OCI image for the tag-shape rationale.
       date = self.lastModifiedDate or "00000000";
       yy = builtins.substring 2 2 date;
       mm = builtins.substring 4 2 date;
       version = "v${yy}.${mm}";
-      # cleanSourceWith filters out the local `data/` directory + Nix
-      # build artifacts. Without this, running `dev-up` (which writes
-      # ./data/share.db) busts the build cache on every change to dev
-      # state. The filter composes with `cleanSourceFilter` (strips
-      # .git/, swap files, editor backups) so the result is the same
-      # shape as `cleanSource ./.` minus our extras.
+      # cleanSourceWith filters out the local `data/` directory and Nix build artifacts. Without it, running
+      # `dev-up` (which writes ./data/share.db) busts the build cache on every change to dev state. The
+      # filter composes with `cleanSourceFilter` (strips .git/, swap files, editor backups), so the result
+      # is the same shape as `cleanSource ./.` minus our extras.
       src = pkgs.lib.cleanSourceWith {
         src = ./.;
         filter = path: type: let
@@ -41,11 +37,9 @@
         rev = self.rev or "dirty";
       };
       devScripts = import ./nix/scripts {inherit pkgs version;};
-      # The NixOS module + agenix wiring for kshared live out of
-      # tree, in the operator's own NixOS configuration. This repo
-      # ships the OCI image only; integrate it via your own systemd
-      # unit or NixOS module that consumes `kshared-image` (or pulls
-      # the loaded image by tag).
+      # The NixOS module + agenix wiring for kshared live out of tree, in the operator's own NixOS
+      # configuration. This repo ships the OCI image only; integrate it with your own systemd unit or NixOS
+      # module that consumes `kshared-image`, or pull the loaded image by tag.
     in {
       packages = {
         inherit (kshare) kshare kshared kshared-image;
@@ -76,9 +70,8 @@
           # Smoke-test client
           curl
 
-          # Dev lifecycle scripts on PATH so you can type `dev-up`
-          # directly inside the dev shell (without the `nix run .#`
-          # wrapper).
+          # Dev lifecycle scripts on PATH so you can type `dev-up` directly inside the dev shell, without
+          # the `nix run .#` wrapper.
           devScripts.dev-up
           devScripts.dev-down
           devScripts.dev-rebuild

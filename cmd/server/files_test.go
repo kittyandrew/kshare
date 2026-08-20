@@ -13,9 +13,8 @@ import (
 	"github.com/kittyandrew/kshare/internal/api"
 )
 
-// seedUpload pushes a row through the upload handler and returns the
-// resulting metadata so subsequent tests don't have to duplicate the
-// multipart dance. Uses TTL=1h, fits inside testServer's range.
+// seedUpload pushes a row through the upload handler and returns the resulting metadata, so tests don't
+// repeat the request-building boilerplate. TTL=1h fits inside testServer's range.
 func seedUpload(t *testing.T, s *server, filename, body string) api.Upload {
 	t.Helper()
 	req := newUploadRequest(http.MethodPost, "/api/upload", "1h", filename, body)
@@ -206,8 +205,7 @@ func TestReplace_BadSlug(t *testing.T) {
 	}
 }
 
-// TestReplace_TTLReset confirms the expiry clock restarts on
-// replace: ExpiresAt = new_uploaded_at + new_ttl.
+// TestReplace_TTLReset confirms the expiry clock restarts on replace: ExpiresAt = new_uploaded_at + new_ttl.
 func TestReplace_TTLReset(t *testing.T) {
 	s := testServer(t)
 	orig := seedUpload(t, s, "page.txt", "v1")
@@ -232,8 +230,7 @@ func TestReplace_TTLReset(t *testing.T) {
 	}
 }
 
-// Verifies that the store-level invariant (ExpiresAt = UploadedAt +
-// TTL) holds across the API layer.
+// Verifies that the store-level invariant (ExpiresAt = UploadedAt + TTL) holds across the API layer.
 func TestUpload_ExpiryIsDerived(t *testing.T) {
 	s := testServer(t)
 	resp := seedUpload(t, s, "file.txt", "x")

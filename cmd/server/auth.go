@@ -1,9 +1,5 @@
-// OIDC bearer-token authentication for the API surface. Single
-// Zitadel issuer + audience pair, configured at boot via env; tokens
-// are verified offline against the JWKS published at
-// `${issuer}/oauth/v2/keys`. No introspection, no per-request RTT to
-// Zitadel. The audience is pinned to the Zitadel project ID; only
-// the `upload` project role is required.
+// OIDC bearer auth for the API. Tokens are verified offline against the issuer's JWKS, so no request costs
+// an introspection round-trip to Zitadel.
 package main
 
 import (
@@ -22,19 +18,14 @@ import (
 	"github.com/zitadel/oidc/v3/pkg/op"
 )
 
-// authenticator wraps the access-token verifier for one Zitadel
-// issuer + audience pair. Constructed once via newAuthenticator;
-// consulted on every authenticated request.
 type authenticator struct {
 	issuer   string
 	audience string // = Zitadel project ID
 	verifier *op.AccessTokenVerifier
 }
 
-// newAuthenticator dials OIDC discovery, builds a remote JWKS keyset,
-// and returns a verifier ready to validate access tokens. Hard-fails
-// if the issuer is unreachable: the alternative (lazy retry on first
-// request) hides config errors at boot.
+// newAuthenticator dials OIDC discovery and builds a remote JWKS keyset. Fails rather than retrying lazily
+// on the first request, which would hide a config error until someone tried to upload.
 func newAuthenticator(ctx context.Context, issuer, audience string) (*authenticator, error) {
 	if issuer == "" {
 		return nil, errors.New("KSHARE_OIDC_ISSUER is required")
@@ -57,10 +48,8 @@ func newAuthenticator(ctx context.Context, issuer, audience string) (*authentica
 	}, nil
 }
 
-// claims is what kshare needs from a verified access token. Role
-// names come from the project-id-scoped Zitadel claim; the unscoped
-// variant is also present in the token but the scoped form is
-// unambiguous.
+// claims is what kshare needs from a verified access token. Role names come from the project-id-scoped
+// Zitadel claim: the unscoped variant is in the token too, but the scoped form is unambiguous.
 type claims struct {
 	Subject   string
 	Roles     map[string]struct{}
@@ -79,9 +68,6 @@ func claimsFromContext(ctx context.Context) (*claims, bool) {
 	return c, ok
 }
 
-// verify is the per-request entry point: parse the bearer header,
-// validate signature / issuer / expiry, then audience-pin and parse
-// roles. Returns claims or a 401-shaped error.
 func (a *authenticator) verify(ctx context.Context, header string) (*claims, error) {
 	raw := bearerFrom(header)
 	if raw == "" {
@@ -101,48 +87,32 @@ func (a *authenticator) verify(ctx context.Context, header string) (*claims, err
 	}, nil
 }
 
-// middleware wraps an http.Handler with bearer-token verification.
-// 401 on missing/invalid token; on success attaches claims to the
-// request context.
-func (a *authenticator) middleware(next http.Handler) http.Handler {
+// require gates a handler on a verified bearer token carrying `role`.
+//
+// Verification and the role check are one wrapper on purpose. Split in two, a route could be registered with
+// authentication and no authorization, and the authorization half would need a "no claims on the context"
+// branch that nothing but a test can reach.
+func (a *authenticator) require(role string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := a.verify(r.Context(), r.Header.Get("Authorization"))
 		if err != nil {
-			// `method` + `path` already on the context logger via
-			// withRequestLogger; don't duplicate here.
-			zerolog.Ctx(r.Context()).Warn().Err(err).
-				Msg("auth rejected")
+			zerolog.Ctx(r.Context()).Warn().Err(err).Msg("auth rejected")
 			w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		ctx := context.WithValue(r.Context(), claimsCtxKey{}, c)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-// Role constant. Name matches the Zitadel project-role key. Single
-// source of truth so a typo on a route doesn't silently authorise
-// something it shouldn't.
-const roleUpload = "upload"
-
-// requireRole returns a handler that 403s if the authenticated
-// principal lacks the named role. Stack on top of
-// authenticator.middleware.
-func requireRole(role string, h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		c, ok := claimsFromContext(r.Context())
-		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
 		if !c.HasRole(role) {
+			zerolog.Ctx(r.Context()).Warn().Str("subject", c.Subject).Str("role", role).
+				Msg("auth rejected: missing role")
 			http.Error(w, "forbidden: missing role "+role, http.StatusForbidden)
 			return
 		}
-		h(w, r)
-	}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), claimsCtxKey{}, c)))
+	})
 }
+
+// roleUpload must match the Zitadel project-role key exactly.
+const roleUpload = "upload"
 
 func bearerFrom(header string) string {
 	if header == "" {
@@ -155,12 +125,8 @@ func bearerFrom(header string) string {
 	return strings.TrimSpace(header[len(prefix):])
 }
 
-// parseRoles extracts role names from Zitadel's per-project roles
-// claim (`urn:zitadel:iam:org:project:<projectID>:roles`). The value
-// is a map of role-key -> { orgID: orgDomain, ... }; we discard
-// everything but the key set. Returns nil (not an empty map) when the
-// claim is absent so callers don't pay for an allocation on the
-// reject path.
+// parseRoles reads Zitadel's per-project roles claim (`urn:zitadel:iam:org:project:<projectID>:roles`),
+// whose value is role-key -> { orgID: orgDomain, ... }. Only the key set matters here.
 func parseRoles(extra map[string]any, projectID string) map[string]struct{} {
 	if extra == nil {
 		return nil

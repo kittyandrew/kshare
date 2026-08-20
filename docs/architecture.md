@@ -1,10 +1,8 @@
 # kshare data flow
 
-ASCII diagrams of the three flows: bearer-gated upload + replace,
-plus the public read flow. Reference material for understanding how
-a request becomes a slug-on-disk; auth and storage decisions live in
-`.claude/rules/001-architecture.md` (topology) and
-`.claude/rules/005-auth.md` (OIDC).
+ASCII diagrams of the three flows: bearer-gated upload + replace, plus the public read flow. Reference
+material for understanding how a request becomes a slug-on-disk; auth and storage decisions live in
+`.claude/rules/001-architecture.md` (topology) and `.claude/rules/005-auth.md` (OIDC).
 
 ## Upload
 
@@ -15,7 +13,7 @@ kshare <file>           # CLI
  +- POST share.example.com/api/upload
         Authorization: Bearer <JWT>
         X-KShare-TTL: 7d                  (optional; server default if absent)
-        X-KShare-Filename: recipe.html    (optional; URL-extension + Content-Disposition)
+        X-KShare-Filename: recipe.html    (optional; on-disk extension + Content-Disposition)
         body: <raw file bytes>
         |
         reverse_proxy --> kshared:
@@ -69,5 +67,5 @@ kshare replace <slug> <file> [--ttl X]
                                   size, uploaded_at, ttl_ns)
               RenameFile("<nonce>.partial", slug + newExt)
               if newExt != oldExt: RemoveFile(slug + oldExt)   best-effort
-              return JSON (same shape as upload; URL may differ if ext changed)
+              return JSON (same shape as upload; URL is slug-only, so it never changes)
 ```

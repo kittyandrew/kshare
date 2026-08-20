@@ -12,31 +12,23 @@ import (
 	"time"
 )
 
-// httpClient is the per-process http.Client. 30 min timeout covers
-// large uploads over slow links; individual subcommands can shrink
-// the per-request budget via context if needed.
+// The 30 min timeout covers large uploads over slow links; subcommands shrink it per request via context.
 var httpClient = &http.Client{Timeout: 30 * time.Minute}
 
-// Body-size caps for response reads. errBodyMax is the cap for non-2xx
-// bodies (libserv-shaped errors are short by design -- "unauthorized\n"
-// is 13 bytes, "forbidden: missing role upload\n" is 32). jsonBodyMax
-// is the cap for 2xx JSON: kshare's largest responses are file-list
-// arrays, ample under 64KB even with hundreds of entries. Caps exist
-// so a hostile or buggy server can't OOM the CLI via a huge response
-// body.
+// Body-size caps for response reads, so a hostile or buggy server can't OOM the CLI with a huge body.
+// errBodyMax covers non-2xx bodies, which are short by design ("unauthorized\n" is 13 bytes, "forbidden:
+// missing role upload\n" is 32). jsonBodyMax covers 2xx JSON, where the largest response is a file list and
+// stays well under 64KB even with hundreds of entries.
 const (
 	errBodyMax  = 256
 	jsonBodyMax = 64 * 1024
 )
 
-// server401Err builds the errRefreshFailed-shape error returned for
-// any HTTP 401 from kshared. The server's response body carries the
-// load-bearing reason (kshared returns short libserv-shaped messages
-// like "unauthorized" or "forbidden: missing role upload"); we read
-// up to errBodyMax bytes and join it with the sentinel so callers
-// route through failRequest's "auth rejected" hint.
+// server401Err builds the errRefreshFailed-shape error for any HTTP 401 from kshared. The response body
+// carries the load-bearing reason ("unauthorized", "forbidden: missing role upload"), so read up to
+// errBodyMax of it and join it with the sentinel, routing callers through failRequest's "auth rejected" hint.
 //
-// Caller must defer resp.Body.Close(); we read but don't close.
+// The caller must defer resp.Body.Close(); this reads but does not close.
 func server401Err(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, errBodyMax))
 	msg := strings.TrimSpace(string(body))
@@ -46,17 +38,13 @@ func server401Err(resp *http.Response) error {
 	return errors.Join(errRefreshFailed, fmt.Errorf("server rejected token: %s", msg))
 }
 
-// doJSON issues req, decodes JSON-on-2xx into out, and translates
-// non-2xx into a flat error including the response body. Bearer
-// attachment is the caller's responsibility (newRequest sets it).
+// doJSON issues req, decodes JSON-on-2xx into out, and turns non-2xx into a flat error carrying the response
+// body. Bearer attachment is the caller's job (newRequest does it).
 //
-// 401 from kshared after newRequest successfully refreshed means
-// the token is fresh and the IdP accepted it -- but the server is
-// rejecting it (audience mismatch, JWT vs Bearer setting reverted,
-// clock skew). Re-logging in mints another identical-shape token,
-// so we route 401 through server401Err / errRefreshFailed (same
-// shape as a refresh-grant rejection: "see the upstream error, fix
-// the cause"). printRefreshError in main.go surfaces the message.
+// A 401 after newRequest already refreshed means the token is fresh and the IdP accepted it, but the server
+// is rejecting it: audience mismatch, JWT vs Bearer setting reverted, clock skew. Logging in again mints an
+// identically-shaped token, so 401 routes through server401Err / errRefreshFailed, the same shape as a
+// refresh-grant rejection. printRefreshError in main.go surfaces the message.
 func doJSON(req *http.Request, out any) error {
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -86,17 +74,12 @@ func doJSON(req *http.Request, out any) error {
 	return nil
 }
 
-// newRequest loads tokens, refreshes on expiry, builds an
-// authenticated *http.Request against the persisted server URL, and
-// returns BOTH the request and the loaded tokenFile. Returning the
-// token lets callers reuse t.Server for things like building public
-// URLs without re-reading auth.json -- before this signature,
-// upload/replace did three loadTokens() per command (server URL,
-// bearer attachment, server URL again for the public URL).
+// newRequest loads tokens, refreshes on expiry, and builds an authenticated *http.Request against the
+// persisted server URL. It returns the loaded tokenFile too, so callers can reuse t.Server (for building a
+// public URL, say) without reading auth.json again.
 //
-// ctx controls both the refresh roundtrip and the resulting request;
-// the caller is responsible for setting body content-type. Errors
-// follow the project's error-routing contract:
+// ctx controls both the refresh roundtrip and the resulting request; the caller sets the body content-type.
+// Errors follow the project's error-routing contract:
 //
 //   - errNotLoggedIn: auth.json missing or has no refresh_token.
 //   - errRefreshFailed-joined: refresh exchange failed.

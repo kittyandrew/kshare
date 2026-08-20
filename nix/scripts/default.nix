@@ -1,8 +1,5 @@
-# Dev environment lifecycle scripts. Each script is a self-contained
-# pkgs.writeShellScriptBin so it works under `nix run .#dev-up` etc.
-# without needing the dev shell to be entered first. dev-up and
-# dev-rebuild take the CalVer `version` so the image tag they reference
-# matches what `nix build .#kshared-image` produces.
+# Each script is standalone, so `nix run .#dev-up` works without entering the dev shell first. dev-up and
+# dev-rebuild take `version` so the image tag they reference matches what `.#kshared-image` produces.
 {
   pkgs,
   version,

@@ -1,9 +1,5 @@
-// kshared: HTTP server for kshare. Owns the read path
-// (GET /s/{slug}) and the bearer-gated API (POST /api/upload,
-// PUT/GET/DELETE /api/files). Fronts a SQLite-backed metadata store
-// plus the on-disk file tree at /data/files/. Sweeper goroutine
-// reaps expired uploads. See .claude/rules/001-architecture.md
-// for the topology; docs/deployment.md for production wiring.
+// kshared: the kshare HTTP server. Topology in .claude/rules/001-architecture.md, production wiring in
+// docs/deployment.md. The route table is in server.go.
 package main
 
 import (
@@ -24,10 +20,8 @@ import (
 	"github.com/kittyandrew/kshare/internal/store"
 )
 
-// Set by ldflags in nix/kshare.nix. Version is CalVer vYY.MM derived
-// from the flake's source modification date. Commit is the short
-// git rev. Bare `go build` (outside Nix) leaves both empty -- the
-// boot log shows them as "" which signals "not a Nix-tagged build."
+// Set by ldflags in nix/kshare.nix: Version is CalVer vYY.MM from the flake's source date, Commit the short
+// git rev. Bare `go build` leaves both empty, which is how the boot log flags a non-Nix build.
 var (
 	Commit  string
 	Version string
@@ -41,17 +35,15 @@ func main() {
 	}
 }
 
-// run is the boot path: env reads, container init, sweeper, listener.
-// Returns on first listener error or signal-triggered shutdown.
+// run is the boot path: env reads, container init, sweeper, listener. Returns on the first listener error or
+// a signal-triggered shutdown.
 func run(ctx context.Context, log zerolog.Logger) error {
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
 	}
 
-	// OIDC discovery is the first thing that can fail in practice.
-	// Hard-fail at boot with a 10s timeout: a misconfigured issuer
-	// should be loud, not deferred to the first upload request.
+	// Hard-fail at boot, 10s ceiling: a misconfigured issuer should be loud, not deferred to first upload.
 	authCtx, authCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer authCancel()
 	auth, err := newAuthenticator(authCtx, cfg.OIDCIssuer, cfg.OIDCAudience)
@@ -68,19 +60,9 @@ func run(ctx context.Context, log zerolog.Logger) error {
 	}
 	defer func() { _ = container.Close() }()
 
-	// Boot-time orphan reap, three passes:
-	//
-	//  1. .partial older than 5 min: crash mid-upload left these on
-	//     disk. Live writes are at most as old as their body transfer
-	//     time; 5 min is comfortably beyond uploadTimeout's worst case.
-	//  2. Committed files (no .partial suffix) with no DB row: crash
-	//     between a row DELETE / replace-cleanup and the os.Remove of
-	//     the disk file. Files belonging to expired-but-not-swept rows
-	//     are kept; only truly rowless files get removed.
-	//  3. Rows pointing at a missing file: crash where INSERT committed
-	//     but the subsequent rename failed AND the row-rollback also
-	//     failed; mirror window on replace-after-UPDATE. Without this
-	//     pass the row sits unreachable until TTL expiry.
+	// Boot reap, in order: stale partials, files with no row, rows with no file. Each store method documents
+	// the crash window it closes. The 5 min floor only shields a previous process still draining, since this
+	// one has not started its listener yet.
 	if removed, err := container.ReapPartials(5 * time.Minute); err != nil {
 		log.Warn().Err(err).Msg("boot: reap partials failed")
 	} else if removed > 0 {
@@ -97,12 +79,8 @@ func run(ctx context.Context, log zerolog.Logger) error {
 		log.Info().Int("removed", removed).Msg("boot: reaped rows with missing files")
 	}
 
-	// Sweep cadence == MinTTL. The sweeper's job is disk hygiene
-	// (server-side expiry filtering on /s/ and /api/files already
-	// hides expired rows from readers, so sweep latency only affects
-	// how long expired files linger on disk). With MinTTL as the
-	// floor, the longest any file can outlive its TTL on disk is
-	// MinTTL.
+	// Sweep cadence == MinTTL: expiry filtering in SQL already hides expired rows from readers, so sweep
+	// latency only bounds how long an expired file lingers on disk, at most MinTTL.
 	sweeperCtx, sweeperCancel := context.WithCancel(ctx)
 	defer sweeperCancel()
 	sweeperDone := make(chan struct{})
@@ -127,10 +105,8 @@ func run(ctx context.Context, log zerolog.Logger) error {
 		Str("version", Version).
 		Msg("kshared listening")
 
-	// Listener runs in its own goroutine so the main goroutine can
-	// block on signal-handling. ListenAndServe returns
-	// http.ErrServerClosed on graceful shutdown; treat that as a
-	// normal exit.
+	// Listener runs in its own goroutine so main can block on signals. ListenAndServe returns
+	// http.ErrServerClosed on graceful shutdown; treat that as a normal exit.
 	listenErr := make(chan error, 1)
 	go func() {
 		err := srv.ListenAndServe()
@@ -153,15 +129,12 @@ func run(ctx context.Context, log zerolog.Logger) error {
 	}
 }
 
-// gracefulShutdown drains in-flight requests + the sweeper after a
-// SIGINT/SIGTERM. Returns nil on clean drain, an error if
-// srv.Shutdown fails. Ordering:
-//  1. http.Server.Shutdown -- stops accepting, lets in-flight finish.
-//     Bounded at 30s.
+// gracefulShutdown drains in-flight requests and the sweeper after a SIGINT/SIGTERM. Returns nil on a clean
+// drain, an error if srv.Shutdown fails. Ordering:
+//  1. http.Server.Shutdown: stops accepting, lets in-flight requests finish. Bounded at 30s.
 //  2. Wait for the listener goroutine to drain so we don't leak it.
-//  3. Cancel + wait for the sweeper. Sweeper drain prevents a torn
-//     DELETE-then-os.Remove from leaking an orphan file across
-//     restart.
+//  3. Cancel and wait for the sweeper. Draining it prevents a torn DELETE-then-os.Remove from leaking an
+//     orphan file across restart.
 func gracefulShutdown(srv *http.Server, listenErr <-chan error, sweeperCancel context.CancelFunc, sweeperDone <-chan struct{}, log zerolog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -178,12 +151,8 @@ func gracefulShutdown(srv *http.Server, listenErr <-chan error, sweeperCancel co
 	return nil
 }
 
-// config is the boot-time settings bundle. All env reads happen in
-// loadConfig; everything else takes a *config (or specific fields).
-//
-// No CleanupInterval field: the sweeper's tick cadence is derived
-// from MinTTL (see run()). Disk hygiene only -- server-side expiry
-// filtering handles user-visible /s/ behaviour.
+// config is the boot-time settings bundle. All env reads happen in loadConfig; everything else takes a
+// *config or specific fields. No CleanupInterval field: the sweeper's cadence derives from MinTTL (see run).
 type config struct {
 	Listen        string
 	DataDir       string
@@ -195,17 +164,13 @@ type config struct {
 	MaxTTL        time.Duration
 }
 
-// loadConfig reads env and applies defaults. Required fields
-// (issuer + audience) are checked once here so the rest of the
-// boot path can assume non-empty. See .env.example for the full
-// list of optional knobs.
+// loadConfig reads env and applies defaults. Issuer and audience are checked once here, so the rest of the
+// boot path can assume they are non-empty. See .env.example for the full list of optional knobs.
 func loadConfig() (*config, error) {
 	cfg := &config{
-		Listen:       envOr("KSHARE_LISTEN", ":6980"),
-		// `/data` matches the OCI image WORKDIR + bind-mount target.
-		// Bare `go run` outside the container would fail on `/data`
-		// without root, so default to `./data` and let the OCI image
-		// set KSHARE_DATA=/data explicitly (see nix/kshare.nix).
+		Listen: envOr("KSHARE_LISTEN", ":6980"),
+		// `./data` not `/data`: bare `go run` outside the container cannot write /data without root. The
+		// OCI image sets KSHARE_DATA=/data explicitly (nix/kshare.nix).
 		DataDir:      envOr("KSHARE_DATA", "./data"),
 		OIDCIssuer:   strings.TrimSpace(strings.TrimRight(os.Getenv("KSHARE_OIDC_ISSUER"), "/")),
 		OIDCAudience: strings.TrimSpace(os.Getenv("KSHARE_OIDC_AUDIENCE")),
@@ -243,9 +208,8 @@ func loadConfig() (*config, error) {
 	return cfg, nil
 }
 
-// newRootLogger configures the process-wide zerolog root. Stderr sink,
-// snake_case keys, ISO-8601 timestamps. JSON by default;
-// console-tinted when KSHARE_LOG_FORMAT=console.
+// newRootLogger configures the process-wide zerolog root: stderr sink, snake_case keys, RFC3339Nano stamps.
+// JSON unless KSHARE_LOG_FORMAT=console.
 func newRootLogger() zerolog.Logger {
 	zerolog.TimestampFieldName = "ts"
 	zerolog.LevelFieldName = "level"
@@ -274,9 +238,7 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// envInt64 parses an int64 from $key, returning fallback if unset or
-// the raw string if malformed (boot fails loudly on bad config rather
-// than silently degrading).
+// envInt64 errors on a malformed value rather than degrading: bad config should fail boot.
 func envInt64(key string, fallback int64) (int64, error) {
 	v := os.Getenv(key)
 	if v == "" {
@@ -289,10 +251,8 @@ func envInt64(key string, fallback int64) (int64, error) {
 	return n, nil
 }
 
-// envTTL is like envDuration but uses api.ParseTTL, which accepts
-// `d` (days) and `w` (weeks) suffixes in addition to the stdlib's
-// h/m/s. Lets operators write `KSHARE_MAX_TTL=365d` instead of
-// `KSHARE_MAX_TTL=8760h`.
+// envTTL parses a duration from $key via api.ParseTTL, which adds `d`/`w` suffixes to the stdlib's h/m/s, so
+// an operator can write `KSHARE_MAX_TTL=365d` instead of `8760h`.
 func envTTL(key string, fallback time.Duration) (time.Duration, error) {
 	v := os.Getenv(key)
 	if strings.TrimSpace(v) == "" {

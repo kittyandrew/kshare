@@ -1,22 +1,18 @@
-// Package api holds the JSON DTOs + identity regexes shared between
-// the kshared HTTP server and the kshare CLI. Single source of truth:
-// a field-tag drift between server emit and CLI decode becomes a
-// compile-time concern, not a silent runtime mismatch.
+// Package api is the wire contract shared by the kshared server and the kshare CLI: DTOs, identity regexes,
+// header names. Anything the two binaries would otherwise spell separately belongs here, where drift is a
+// compile error instead of a silent runtime mismatch.
 package api
 
 import "time"
 
-// Upload is one upload's metadata. Returned as the body of POST
-// /api/upload and PUT /api/files/{slug}; returned as a JSON array
-// element of GET /api/files. Single type used by both endpoints +
-// the CLI decode paths.
+// Upload is one upload's metadata: the body of POST /api/upload and PUT /api/files/{slug}, and an element of
+// the array from GET /api/files. One type for both endpoints and for the CLI decode paths.
 //
-// No `url` field: the public URL is `serverURL + "/s/" + slug` (the
-// URL is slug-only; extension surfaces via Content-Disposition on the
-// served response) and the CLI constructs it locally.
+// No `url` field: the public URL is `serverURL + "/s/" + slug`, which the CLI builds locally. The URL is
+// slug-only; the extension surfaces via Content-Disposition on the served response.
 type Upload struct {
 	Slug             string    `json:"slug"`
-	Extension        string    `json:"extension"` // ".html" or "" (leading dot); on-disk + Content-Disposition only
+	Extension        string    `json:"extension"` // ".html" or "", leading dot included
 	OriginalFilename string    `json:"original_filename"`
 	Size             int64     `json:"size"`
 	ContentType      string    `json:"content_type"`

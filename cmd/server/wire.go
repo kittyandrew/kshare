@@ -11,19 +11,11 @@ import (
 	"time"
 
 	"github.com/kittyandrew/kshare/internal/api"
+	"github.com/kittyandrew/kshare/internal/store"
 )
 
-// uploadHeaders centralises the X-KShare-* header names used by the
-// CLI <-> server wire. Single source of truth so a typo is a compile
-// error, not a runtime silent-default fallback.
-const (
-	headerTTL      = "X-KShare-TTL"
-	headerFilename = "X-KShare-Filename"
-)
-
-// requestInputs is what handleUpload/handleReplaceFile derive from
-// the request before touching disk. Single shape so the two handlers
-// share the parser.
+// requestInputs is what handleUpload + handleReplaceFile derive from a request before touching disk; one
+// shape so both share the parser.
 type requestInputs struct {
 	TTL              time.Duration
 	OriginalFilename string    // sanitised
@@ -32,26 +24,21 @@ type requestInputs struct {
 	File             io.Reader // sniff bytes prepended; rest streams
 }
 
-// parseUploadRequest validates the wire-layer inputs (TTL header in
-// range, filename header non-malicious) and returns a reader
-// positioned at byte 0 of the file body (sniff buffer + remaining
-// body via io.MultiReader). The caller streams from File into
-// WriteFile.
+// parseUploadRequest validates the wire-layer inputs and returns a reader positioned at byte 0 of the body
+// (sniff buffer + remaining body via io.MultiReader). The caller streams File into WriteFile.
 //
 // Wire format (POST /api/upload + PUT /api/files/{slug}):
 //   - Body: raw file bytes, capped by MaxBytesReader = MaxUploadSize.
-//   - X-KShare-TTL: optional duration; falls back to DEFAULT_TTL if
-//     absent. api.ParseTTL accepts `d`/`w` suffixes.
-//   - X-KShare-Filename: optional uploader filename; only used to
-//     derive Extension + OriginalFilename. Server synthesises the
-//     on-disk name as `<slug><extension>` regardless.
+//   - X-KShare-TTL: optional duration, DEFAULT_TTL if absent. api.ParseTTL accepts `d`/`w` suffixes.
+//   - X-KShare-Filename: optional, and only used to derive Extension + OriginalFilename. The on-disk name
+//     is `<slug><extension>` regardless of what the uploader sent.
 func (s *server) parseUploadRequest(r *http.Request) (*requestInputs, int, error) {
 	out := &requestInputs{TTL: s.cfg.DefaultTTL}
 
-	if t := r.Header.Get(headerTTL); t != "" {
+	if t := r.Header.Get(api.HeaderTTL); t != "" {
 		d, err := api.ParseTTL(t)
 		if err != nil {
-			return nil, http.StatusBadRequest, fmt.Errorf("%s: %w", headerTTL, err)
+			return nil, http.StatusBadRequest, fmt.Errorf("%s: %w", api.HeaderTTL, err)
 		}
 		out.TTL = d
 	}
@@ -60,7 +47,7 @@ func (s *server) parseUploadRequest(r *http.Request) (*requestInputs, int, error
 			"ttl %s outside allowed range [%s, %s]", out.TTL, s.cfg.MinTTL, s.cfg.MaxTTL)
 	}
 
-	hf := r.Header.Get(headerFilename)
+	hf := r.Header.Get(api.HeaderFilename)
 	out.OriginalFilename = sanitiseOriginalFilename(filepath.Base(hf))
 	out.Extension = sanitiseExt(filepath.Ext(hf))
 
@@ -85,15 +72,10 @@ func (s *server) parseUploadRequest(r *http.Request) (*requestInputs, int, error
 	return out, 0, nil
 }
 
-// streamToPartial is phase 1 of upload + replace: wrap the body with
-// MaxBytesReader, parse the wire-layer inputs, and stream the file
-// to a nonce-named `.partial` in files/. The caller owns cleanup of
-// the partial on any subsequent error path; on the happy path the
-// caller renames it to its final `<slug><ext>` name.
-//
-// Returns (partialName, size, inputs, statusCode, error). On error
-// the caller passes status + error directly into httpError; on
-// success status is 0.
+// streamToPartial is phase 1 of upload + replace: cap the body, parse the wire inputs, stream to a
+// nonce-named `.partial` in files/. The caller owns that partial from here, removing it on any error path
+// and renaming it to `<slug><ext>` on the happy one. The returned status is 0 on success, otherwise it goes
+// straight into httpError.
 func (s *server) streamToPartial(w http.ResponseWriter, r *http.Request) (string, int64, *requestInputs, int, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxUploadSize)
 
@@ -119,19 +101,21 @@ func (s *server) streamToPartial(w http.ResponseWriter, r *http.Request) (string
 	return partialName, size, in, 0, nil
 }
 
-// writeUploadJSON serialises the upload-response shape consumed by
-// POST /api/upload + PUT /api/files/{slug}. Single source of truth
-// so the two handlers can't drift on field shape; a future field add
-// is one edit.
-func writeUploadJSON(w http.ResponseWriter, slug string, in *requestInputs, size int64, uploadedAt time.Time) {
+// toAPI is the only store-row to DTO mapping in the server. Every response goes through it, so expiry stays
+// derived in exactly one place (store.Upload.ExpiresAt) and no endpoint can drift on field shape.
+func toAPI(u *store.Upload) api.Upload {
+	return api.Upload{
+		Slug:             u.Slug,
+		Extension:        u.Extension,
+		OriginalFilename: u.OriginalFilename,
+		Size:             u.Size,
+		ContentType:      u.ContentType,
+		UploadedAt:       u.UploadedAt,
+		ExpiresAt:        u.ExpiresAt(),
+	}
+}
+
+func writeUploadJSON(w http.ResponseWriter, u *store.Upload) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(api.Upload{
-		Slug:             slug,
-		Extension:        in.Extension,
-		OriginalFilename: in.OriginalFilename,
-		Size:             size,
-		ContentType:      in.ContentType,
-		UploadedAt:       uploadedAt,
-		ExpiresAt:        uploadedAt.Add(in.TTL),
-	})
+	_ = json.NewEncoder(w).Encode(toAPI(u))
 }

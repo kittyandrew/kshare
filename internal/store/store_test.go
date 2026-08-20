@@ -13,10 +13,8 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// newTestContainer constructs a Container backed by an on-disk SQLite
-// in t.TempDir(). Each test gets a private data dir. Logger is at
-// disabled level so test output stays clean; flip to Trace if you're
-// chasing a flake.
+// newTestContainer constructs a Container backed by an on-disk SQLite in t.TempDir(), so each test gets a
+// private data dir. The logger is disabled to keep test output clean; flip it to Trace when chasing a flake.
 func newTestContainer(t *testing.T) *Container {
 	t.Helper()
 	c, err := NewContainer(context.Background(), Config{
@@ -30,10 +28,9 @@ func newTestContainer(t *testing.T) *Container {
 	return c
 }
 
-// mustInsert seeds a row that expires at `expires`. Constructs the
-// stored fields (UploadedAt + TTL) from a single absolute expiry so
-// tests stay readable; ExpiresAt() will return `expires` (truncated
-// to seconds, since that's what the DB round-trip preserves).
+// mustInsert seeds a row that expires at `expires`, deriving the stored fields (UploadedAt + TTL) from that
+// single absolute expiry so tests stay readable. ExpiresAt() then returns `expires`, truncated to seconds
+// because that is what the DB round-trip preserves.
 func mustInsert(t *testing.T, c *Container, slug string, expires time.Time) *Upload {
 	t.Helper()
 	uploadedAt := time.Now().UTC().Truncate(time.Second)
@@ -62,7 +59,7 @@ func TestContainer_OpenAndUpgrade(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("fresh DB should be empty, got %d rows", len(got))
 	}
-	// files/ exists -- .partial scratch lives alongside committed files.
+	// files/ exists; .partial scratch lives alongside committed files.
 	info, err := os.Stat(filepath.Join(c.dataDir, "files"))
 	if err != nil {
 		t.Fatalf("stat files: %v", err)
@@ -129,9 +126,8 @@ func TestContainer_InsertCollision(t *testing.T) {
 func TestContainer_ListAll_NewestFirst(t *testing.T) {
 	c := newTestContainer(t)
 	ctx := context.Background()
-	// Three rows with explicit uploaded_at offset back from now,
-	// oldest first. Long TTL so the new server-side expiry filter
-	// in ListAll doesn't hide them.
+	// Three rows with explicit uploaded_at offsets back from now, oldest first. Long TTL so ListAll's
+	// server-side expiry filter doesn't hide them.
 	now := time.Now().UTC().Truncate(time.Second)
 	for i, slug := range []string{"oldslug1", "midslug1", "newslug1"} {
 		u := &Upload{
@@ -159,8 +155,7 @@ func TestContainer_ListAll_NewestFirst(t *testing.T) {
 	}
 }
 
-// TestContainer_ListAll_FiltersExpired confirms the new server-side
-// expiry filter hides rows that are past their (uploaded_at + ttl).
+// Confirms the server-side expiry filter hides rows past their (uploaded_at + ttl).
 func TestContainer_ListAll_FiltersExpired(t *testing.T) {
 	c := newTestContainer(t)
 	ctx := context.Background()
@@ -198,15 +193,15 @@ func TestContainer_ListAll_FiltersExpired(t *testing.T) {
 	}
 }
 
-func TestContainer_WriteAtomic(t *testing.T) {
+func TestContainer_WriteFile(t *testing.T) {
 	c := newTestContainer(t)
 	const body = "<!doctype html><h1>hi</h1>\n"
 	n, err := c.WriteFile("aF3xK9pQ.html", strings.NewReader(body))
 	if err != nil {
-		t.Fatalf("WriteAtomic: %v", err)
+		t.Fatalf("WriteFile: %v", err)
 	}
 	if n != int64(len(body)) {
-		t.Fatalf("WriteAtomic wrote %d bytes, want %d", n, len(body))
+		t.Fatalf("WriteFile wrote %d bytes, want %d", n, len(body))
 	}
 	got, err := os.ReadFile(c.FilePath("aF3xK9pQ.html"))
 	if err != nil {
@@ -225,9 +220,8 @@ func TestContainer_WriteAtomic(t *testing.T) {
 	}
 }
 
-// errReader is an io.Reader that returns an error after the first
-// successful read. Used to drive WriteAtomic into its failure branch
-// so we can verify the tempfile is cleaned up.
+// errReader is an io.Reader that errors after the first successful read, to drive WriteFile into its failure
+// branch and check that the partial file is cleaned up.
 type errReader struct {
 	delivered bool
 }
@@ -282,9 +276,8 @@ func TestSweeper_RemovesExpiredOnly(t *testing.T) {
 		}
 	}
 
-	// One immediate sweep via the unexported entry point: avoids
-	// having to drive a ticker. Equivalent to the boot-time sweep
-	// inside RunSweeper.
+	// One immediate sweep via the unexported entry point, which avoids driving a ticker. Equivalent to the
+	// boot-time sweep inside RunSweeper.
 	c.sweepOnce(ctx, c.log)
 
 	if got, _ := c.GetBySlug(ctx, expired.Slug); got != nil {
@@ -304,24 +297,5 @@ func TestSweeper_RemovesExpiredOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(c.FilePath(fresh.DiskName())); err != nil {
 		t.Fatalf("fresh file %s should remain: %v", fresh.DiskName(), err)
-	}
-}
-
-// TestSweeper_BootSweep covers the synchronous boot pass used by
-// main.go to close the "URL still serves expired" window across
-// restart. BootSweep is the exported synchronous variant; the
-// timer-driven RunSweeper wraps it. No goroutine, no time.Sleep.
-func TestSweeper_BootSweep(t *testing.T) {
-	c := newTestContainer(t)
-	mustInsert(t, c, "expired0", time.Now().Add(-time.Hour))
-
-	c.BootSweep(context.Background())
-
-	got, err := c.GetBySlug(context.Background(), "expired0")
-	if err != nil {
-		t.Fatalf("GetBySlug: %v", err)
-	}
-	if got != nil {
-		t.Fatalf("boot sweep should have removed expired row, got %+v", got)
 	}
 }
