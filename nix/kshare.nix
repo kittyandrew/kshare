@@ -9,7 +9,7 @@
   #   1. set to pkgs.lib.fakeHash
   #   2. run `nix build .#kshared`
   #   3. paste the "got" sha256 from the error message back here.
-  vendorHash = "sha256-SO/4mM/NxWPb3euu0F2Nu9k/KTXpblWriSZ7yxWNS8Q=";
+  vendorHash = "sha256-9M/mFhLNjXRNesDJc+WUnBHovmSuYoWeMpTBzGnF0tE=";
 
   # Docker's Healthcheck struct wants nanosecond ints. Self-documenting arithmetic beats a magic 10000000000.
   nsPerSec = 1000 * 1000 * 1000;
