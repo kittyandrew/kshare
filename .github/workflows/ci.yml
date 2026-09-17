@@ -1,6 +1,6 @@
 name: ci
 
-# Go gates only. Nix and the Attic push live in build.yml, so this workflow needs no secrets and fork PRs
+# Go gates only. Nix lives in build.yml, so this workflow needs no secrets and fork PRs
 # run against it safely.
 
 on:
