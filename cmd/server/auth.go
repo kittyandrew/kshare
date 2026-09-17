@@ -48,8 +48,7 @@ func newAuthenticator(ctx context.Context, issuer, audience string) (*authentica
 	}, nil
 }
 
-// claims is what kshare needs from a verified access token. Role names come from the project-id-scoped
-// Zitadel claim: the unscoped variant is in the token too, but the scoped form is unambiguous.
+// claims is what kshare needs from an audience-checked access token. The provider must scope roles to kshare.
 type claims struct {
 	Subject   string
 	Roles     map[string]struct{}
@@ -82,7 +81,7 @@ func (a *authenticator) verify(ctx context.Context, header string) (*claims, err
 	}
 	return &claims{
 		Subject:   tok.Subject,
-		Roles:     parseRoles(tok.Claims, a.audience),
+		Roles:     parseRoles(tok.Claims),
 		ExpiresAt: tok.GetExpiration(),
 	}, nil
 }
@@ -111,7 +110,7 @@ func (a *authenticator) require(role string, next http.Handler) http.Handler {
 	})
 }
 
-// roleUpload must match the Zitadel project-role key exactly.
+// roleUpload must match the provider's application role exactly.
 const roleUpload = "upload"
 
 func bearerFrom(header string) string {
@@ -125,24 +124,18 @@ func bearerFrom(header string) string {
 	return strings.TrimSpace(header[len(prefix):])
 }
 
-// parseRoles reads Zitadel's per-project roles claim (`urn:zitadel:iam:org:project:<projectID>:roles`),
-// whose value is role-key -> { orgID: orgDomain, ... }. Only the key set matters here.
-func parseRoles(extra map[string]any, projectID string) map[string]struct{} {
-	if extra == nil {
-		return nil
-	}
-	key := "urn:zitadel:iam:org:project:" + projectID + ":roles"
-	raw, ok := extra[key]
-	if !ok {
-		return nil
-	}
-	m, ok := raw.(map[string]any)
+func parseRoles(extra map[string]any) map[string]struct{} {
+	m, ok := extra["roles"].([]any)
 	if !ok {
 		return nil
 	}
 	out := make(map[string]struct{}, len(m))
-	for k := range m {
-		out[k] = struct{}{}
+	for _, value := range m {
+		role, ok := value.(string)
+		if !ok {
+			return nil
+		}
+		out[role] = struct{}{}
 	}
 	return out
 }

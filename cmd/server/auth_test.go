@@ -22,18 +22,14 @@ func TestBearerFrom(t *testing.T) {
 }
 
 func TestParseRoles(t *testing.T) {
-	project := "proj123"
 	extra := map[string]any{
-		"urn:zitadel:iam:org:project:proj123:roles": map[string]any{
-			"upload": map[string]any{"org-1": "example.com"},
-			"admin":  map[string]any{},
-		},
+		"roles": []any{"upload", "admin"},
 		"urn:zitadel:iam:org:project:other:roles": map[string]any{
 			"other-role": map[string]any{},
 		},
 		"unrelated_claim": "ignored",
 	}
-	got := parseRoles(extra, project)
+	got := parseRoles(extra)
 	if _, ok := got["upload"]; !ok {
 		t.Error("missing 'upload' role")
 	}
@@ -49,14 +45,14 @@ func TestParseRoles(t *testing.T) {
 }
 
 func TestParseRoles_NilExtra(t *testing.T) {
-	got := parseRoles(nil, "any-project")
+	got := parseRoles(nil)
 	if len(got) != 0 {
 		t.Errorf("nil extra should yield empty map, got %v", got)
 	}
 }
 
 func TestParseRoles_MissingClaim(t *testing.T) {
-	got := parseRoles(map[string]any{"other": "stuff"}, "proj123")
+	got := parseRoles(map[string]any{"other": "stuff"})
 	if len(got) != 0 {
 		t.Errorf("missing project-roles claim should yield empty map, got %v", got)
 	}

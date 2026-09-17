@@ -5,8 +5,9 @@ that renders inline in the browser.
 
 ## Setup
 
-You need an existing Zitadel project to authenticate the CLI. The operator-side procedure (creating the
-`kshare` project, the `upload` role, the API + CLI apps) is in `docs/zitadel.md`. Once it's done:
+The CLI authenticates against any OIDC provider that can stamp an audience into the access token and
+assert a `roles` string array containing `upload`. `docs/zitadel.md` is a worked example for Zitadel;
+`KSHARE_OIDC_SCOPES` covers providers that need extra scopes to emit those claims. Once that exists:
 
 ```sh
 cp .env.example .env
@@ -18,7 +19,7 @@ direnv allow                 # picks up .env via .envrc
 ## Authenticating the CLI
 
 ```sh
-nix run .#kshare -- auth login     # opens browser for Zitadel device flow
+nix run .#kshare -- auth login     # opens browser for the device flow
 nix run .#kshare -- ls        # confirm auth works (empty list is fine)
 ```
 

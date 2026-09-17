@@ -64,7 +64,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `kshare: OIDC-gated file share CLI
 
 Usage:
-  kshare auth login [--server URL]      Zitadel device-flow login
+  kshare auth login [--server URL]      OIDC device-flow login
                                         (--server defaults to $KSHARE_SERVER,
                                         else http://localhost:6980)
   kshare auth logout                    Clear cached tokens
@@ -79,11 +79,13 @@ KSHARE_DEFAULT_TTL (7d by default). Must be within
 [KSHARE_MIN_TTL, KSHARE_MAX_TTL].
 
 Environment (required for `+"`kshare auth login`"+`):
-  KSHARE_OIDC_ISSUER      Zitadel base URL
-  KSHARE_OIDC_AUDIENCE    Zitadel project ID
+  KSHARE_OIDC_ISSUER      OIDC issuer base URL
+  KSHARE_OIDC_AUDIENCE    Audience the provider stamps into aud[]
   KSHARE_OIDC_CLIENT_ID   kshare-cli Native app client ID
 
 Optional:
+  KSHARE_OIDC_SCOPES      Space-separated extra scopes (default: offline_access);
+                          openid is always requested
   KSHARE_SERVER           Default for --server at login time
 
 After `+"`kshare auth login`"+`, these + the server URL are persisted to

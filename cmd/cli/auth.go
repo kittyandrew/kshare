@@ -92,16 +92,13 @@ func deleteTokens() error {
 	return nil
 }
 
-// loginScopes is the set requested in the device flow. The audience URN pins the project id into the
-// resulting token's aud[] so the server can audience-check it; the roles URN makes Zitadel assert the
-// project role claim.
-func loginScopes(audience string) []string {
-	return []string{
-		"openid",
-		"offline_access",
-		"urn:zitadel:iam:org:project:id:" + audience + ":aud",
-		"urn:zitadel:iam:org:projects:roles",
+// Providers must emit the configured audience and a roles string array in access tokens.
+func loginScopes() []string {
+	scopes := os.Getenv("KSHARE_OIDC_SCOPES")
+	if scopes == "" {
+		scopes = "offline_access"
 	}
+	return append([]string{"openid"}, strings.Fields(scopes)...)
 }
 
 const localServerURL = "http://localhost:6980"
@@ -122,7 +119,7 @@ func validServerURL(s string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
-// runLogin drives the device flow against the Zitadel issuer in the env (KSHARE_OIDC_ISSUER + _CLIENT_ID +
+// runLogin drives the device flow against the issuer in the env (KSHARE_OIDC_ISSUER + _CLIENT_ID +
 // _AUDIENCE, all mandatory) and persists the tokens. The server URL is frozen into auth.json here: later
 // commands read it from there, so a stray env var can't redirect an upload after the fact.
 func runLogin(args []string) {
@@ -159,7 +156,7 @@ func runLogin(args []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
-	scopes := loginScopes(audience)
+	scopes := loginScopes()
 	relying, err := rp.NewRelyingPartyOIDC(ctx, issuer, clientID, "", "", scopes)
 	if err != nil {
 		fail("kshare auth login: oidc init: %v", err)
@@ -170,11 +167,10 @@ func runLogin(args []string) {
 		fail("kshare auth login: device authorization: %v", err)
 	}
 
-	// @NOTE: zitadel-specific. Zitadel's device_authorization_endpoint returns verification URLs pointing at
-	// the legacy v1 login UI (/device, /ui/login/), which has known WebAuthn projection bugs for org-scoped
-	// users, so construct the v2 path from the issuer base instead. A port to another OIDC provider
-	// (Authelia, Keycloak, Dex) needs this gone; see docs/decisions/2026-05-17-device-code-vs-pkce.md.
-	verify := issuer + "/ui/v2/login/device?user_code=" + url.QueryEscape(da.UserCode)
+	verify := da.VerificationURIComplete
+	if verify == "" {
+		verify = da.VerificationURI
+	}
 	fmt.Fprintf(os.Stderr, "kshare: open %s\n", verify)
 	fmt.Fprintf(os.Stderr, "kshare: code %s\n", da.UserCode)
 
@@ -323,7 +319,7 @@ func ensureFreshAccessToken(ctx context.Context, t *tokenFile) (*tokenFile, erro
 	if t.RefreshToken == "" {
 		return nil, errNotLoggedIn
 	}
-	relying, err := rp.NewRelyingPartyOIDC(ctx, t.Issuer, t.ClientID, "", "", loginScopes(t.Audience))
+	relying, err := rp.NewRelyingPartyOIDC(ctx, t.Issuer, t.ClientID, "", "", loginScopes())
 	if err != nil {
 		// IdP-side problem (JWKS unreachable, discovery doc broken); re-login won't fix it. Route through
 		// errRefreshFailed so the caller's "fix the upstream cause" hint applies.
