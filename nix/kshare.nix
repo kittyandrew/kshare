@@ -4,12 +4,12 @@
   rev,
   version,
 }: let
-  # vendorHash comes from go.sum, and one hash covers both binaries because they share the module and differ
-  # only in subPackages. Bump it after `go get` changes deps (per .claude/rules/003-dev-stack.md):
+  # Both binaries share the full `go mod vendor` tree and its hash because they use the same module.
+  # After `go get` changes deps (per .claude/rules/003-dev-stack.md):
   #   1. set to pkgs.lib.fakeHash
   #   2. run `nix build .#kshared`
   #   3. paste the "got" sha256 from the error message back here.
-  vendorHash = "sha256-9M/mFhLNjXRNesDJc+WUnBHovmSuYoWeMpTBzGnF0tE=";
+  vendorHash = "sha256-WI61nqxZeMBguGKIrgdl0BPayAVEzYO3H9KT/quY//U=";
 
   # Docker's Healthcheck struct wants nanosecond ints. Self-documenting arithmetic beats a magic 10000000000.
   nsPerSec = 1000 * 1000 * 1000;
