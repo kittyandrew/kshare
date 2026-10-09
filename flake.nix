@@ -10,7 +10,16 @@
     forAllSystems = nixpkgs.lib.genAttrs ["x86_64-linux" "aarch64-linux"];
 
     perSystem = system: let
-      pkgs = nixpkgs.legacyPackages.${system};
+      pkgs = nixpkgs.legacyPackages.${system}.extend (final: prev: {
+        go = prev.go_1_26.overrideAttrs (finalAttrs: _: {
+          version = builtins.head (builtins.match ".*\ngo ([^\n]+)\n.*" (builtins.readFile ./go.mod));
+          src = prev.fetchurl {
+            url = "https://go.dev/dl/go${finalAttrs.version}.src.tar.gz";
+            hash = "sha256-lzXX3Ntls10/pXfwQGRzfAO4nPGitx5uaf4vPG+f1Mo=";
+          };
+        });
+        buildGoModule = prev.buildGoModule.override {go = final.go;};
+      });
       # CalVer: vYY.MM derived from the flake's source modification date. `self.lastModifiedDate` is
       # "YYYYMMDDhhmmss", so a May 2026 build reports `v26.05`. Operator-managed release tags use an
       # expanded semver shape, `v0.YYMM.Z` (e.g. `v0.2605.0`), so `git tag --sort=v:refname` orders cleanly
