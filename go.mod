@@ -1,6 +1,6 @@
 module github.com/kittyandrew/kshare
 
-go 1.26.9
+go 1.26.10
 
 require (
 	github.com/rs/zerolog v1.35.1
