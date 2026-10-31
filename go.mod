@@ -3,6 +3,7 @@ module github.com/kittyandrew/kshare
 go 1.26.10
 
 require (
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/rs/zerolog v1.35.1
 	github.com/zitadel/oidc/v3 v3.47.5
 	go.mau.fi/util v0.9.9-0.20260505143909-8e67f0d355e0
@@ -14,7 +15,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-chi/chi/v5 v5.4.0 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
