@@ -15,7 +15,7 @@
           version = builtins.head (builtins.match ".*\ngo ([^\n]+)\n.*" (builtins.readFile ./go.mod));
           src = prev.fetchurl {
             url = "https://go.dev/dl/go${finalAttrs.version}.src.tar.gz";
-            hash = "sha256-/WPog7ovK/ypPBZGsx6+9j4rHk0rMXyXidl2po2B828=";
+            hash = "sha256-1EEBsP8n7SpMda1GwXucdDWSCeLrLKfJ32y0/baOGWk=";
           };
         });
         buildGoModule = prev.buildGoModule.override {go = final.go;};
